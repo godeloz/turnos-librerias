@@ -103,6 +103,36 @@ function avatar(p, tam = 36, anillo = null){
   const av = `<span class="av av-${tam}">${cuerpo}</span>`;
   return anillo ? `<span class="av-ring ${anillo}">${av}</span>` : av;
 }
+/* Las tres franjas del día. El color deja de ser una etiqueta de turno
+   y pasa a decir por qué horas del día pasa cada persona. */
+const FRANJA = { manana:'#FBDD1D', tarde:'#1E6DB4', noche:'#EF70A5' };
+
+function gradienteDia(ini, fin){
+  const span = fin - ini, d = 6;
+  const p = m => (m - ini)/span*100;
+  const a = p(12*60), b = p(18*60);
+  const st = [];
+  const add = (c,x) => st.push(c + ' ' + Math.max(0, Math.min(100, x)).toFixed(2) + '%');
+  if(a > 0){ add(FRANJA.manana, 0); add(FRANJA.manana, a-d); add(FRANJA.tarde, a+d); }
+  else add(FRANJA.tarde, 0);
+  if(b < 100){ add(FRANJA.tarde, b-d); add(FRANJA.noche, b+d); add(FRANJA.noche, 100); }
+  else add(FRANJA.tarde, 100);
+  return 'linear-gradient(90deg,' + st.join(',') + ')';
+}
+
+/* Horario vigente: durante la feria puede ser distinto al de diario. */
+function horarioDe(l, fecha){
+  const enFeria = l && l.modo_fiesta && l.evento_inicio && l.evento_fin
+    && fecha >= l.evento_inicio && fecha <= l.evento_fin;
+  return {
+    ini: min((enFeria && l.feria_apertura) ? l.feria_apertura : ((l && l.apertura) || '09:30')),
+    fin: min((enFeria && l.feria_cierre)   ? l.feria_cierre   : ((l && l.cierre)   || '21:00'))
+  };
+}
+
+const faltanPara = f => Math.round(
+  (Date.parse(f+'T00:00:00Z') - Date.parse(S.fecha+'T00:00:00Z'))/86400000);
+
 const libDe = id => S.librerias.find(l => l.id === id);
 const perDe = id => S.personas.find(p => p.id === id);
 const equipoDe = id => S.personas.filter(p => p.libreria_id === id && p.activa);
@@ -231,19 +261,19 @@ const enSala = id => ['sala','descanso'].includes(estadoDe(id).clave);
 
 function cobertura(fecha){
   const l = libDe(S.libreriaVista);
-  const ini = min(l?.apertura || '09:30'), fin = min(l?.cierre || '21:00');
+  const {ini, fin} = horarioDe(l, fecha);
   const out = [];
   for(let m = ini; m < fin; m += 30){
-    let n = 0;
+    let n = 0, quien = [];
     for(const t of S.turnos){
       if(t.fecha !== fecha || !t.inicio || t.tipo === 'libre') continue;
       const a = min(t.inicio), b = min(t.fin);
       if(m < a || m >= b) continue;
       if(t.descanso_inicio){ const d = min(t.descanso_inicio);
         if(m >= d && m < d + t.descanso_min) continue; }
-      n++;
+      n++; quien.push(t.persona_id);
     }
-    out.push({m, n});
+    out.push({m, n, quien});
   }
   return out;
 }
@@ -272,9 +302,12 @@ async function pintarIngreso(msg){
 
   let h = `<div class="portada">${criatura(88)}
     <h2>Salón de Editoriales<br>Independientes</h2>`;
-  if(dn)          h += `<div class="diagrande">${dn}</div><div class="lbl">día de la fiesta</div>`;
-  else if(faltan) h += `<div class="diagrande">${faltan}</div>
-                        <div class="lbl">${faltan===1?'día para empezar':'días para empezar'}</div>`;
+  if(dn) h += `<div class="cuenta"><b>${dn}</b>
+      <div class="lbl">día de ${esc(principal?.evento_nombre || 'la fiesta')}</div></div>`;
+  else if(faltan) h += `<div class="cuenta"><b>${faltan}</b>
+      <div class="lbl">${faltan===1?'día para empezar':'días para empezar'}</div>
+      ${principal?.evento_nombre ? `<p class="fecha">${esc(principal.evento_nombre)}<br>
+        arranca el ${esc(fechaLarga(principal.evento_inicio))}</p>` : ''}</div>`;
   h += `<div class="fecha">${fechaLarga(hoy)} · ${horaAhora()}</div></div>`;
 
   if(!G.length){
@@ -360,12 +393,23 @@ function pintarCabecera(){
 
 function navegadorDias(){
   const l = libDe(S.libreriaVista);
-  return `<div class="dias-nav">` + diasDe(S.rango[0], S.rango[1]).map(d => {
-    const dn = diaEvento(l, d);
-    return `<button class="dia-chip${d===S.fechaVista?' sel':''}${d===S.fecha?' hoy':''}"
-      data-dia="${d}"><i>${DOW3[dowDe(d)]}</i><b>${diaNum(d)}</b>
-      ${dn ? `<span class="dn">día ${dn}</span>` : ''}</button>`;
-  }).join('') + `</div>`;
+  let h = '';
+  if(l?.modo_fiesta && l.evento_inicio && l.evento_fin){
+    h += '<div class="dias-nav">' + diasDe(l.evento_inicio, l.evento_fin).map(d => {
+      const dn = diaEvento(l, d);
+      return `<button class="dia-chip${d===S.fechaVista?' sel':''}${d===S.fecha?' hoy':''}"
+        data-dia="${d}"><i>${DOW3[dowDe(d)]}</i><b>${diaNum(d)}</b>
+        ${dn ? `<span class="dn">día ${dn}</span>` : ''}</button>`;
+    }).join('') + '</div>';
+  }
+  h += `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+    <span class="lbl">ir a una fecha</span>
+    <input type="date" id="saltarFecha" value="${S.fechaVista}"
+      style="width:auto;flex:1;min-width:150px;padding:8px 11px;font-size:.8rem">
+    ${S.fechaVista !== S.fecha
+      ? `<button class="btn sec mini" id="volverHoy">Hoy</button>` : ''}
+  </div>`;
+  return h;
 }
 
 function selectorLibrerias(){
@@ -384,39 +428,59 @@ function vistaInicio(){
   const propia = S.yo.libreria_id === S.libreriaVista;
   const cerrado = !!S.dia?.cerrado;
   const esHoy = S.fechaVista === S.fecha;
+  const faltan = faltanPara(S.fechaVista);
   let h = '';
 
-  if(propia && esHoy){
-    const j = S.miJornada;
+  /* Las acciones se ven siempre. Cuando el día visto no es hoy quedan
+     apagadas y dicen por qué, en vez de desaparecer. */
+  if(propia){
+    const j = esHoy ? S.miJornada : null;
     const saludado = !!j?.saludo_en, descansado = !!j?.descanso_en, cerrada = !!j?.cierre_en;
     const m = minutosAhora();
     const etiquetaDescanso = m < 720 ? "Desayuno en Tiffany's"
                            : m < 1080 ? 'Almuerzo sobre la hierba' : 'Comer, beber, amar';
+    const motivo = !esHoy
+      ? (faltan > 0 ? `Faltan ${faltan} ${faltan===1?'día':'días'} para esta fecha`
+                    : `Este día ya pasó`)
+      : null;
+    const off = !esHoy || cerrado;
+
     h += `<div class="acciones">
-      <button class="accion ${saludado ? '' : 'principal'}" id="btnSaludar"
-        ${saludado || cerrado ? 'disabled' : ''}>
+      <button class="accion ${!off && !saludado ? 'principal' : ''}" id="btnSaludar"
+        ${off || saludado ? 'disabled' : ''}>
         <span class="emo">${saludado ? '✅' : '👋'}</span>
         <span>${saludado ? 'Ya saludaste hoy' : 'Saludar'}
-        <span class="sub">${cerrado ? 'El día está cerrado'
+        <span class="sub">${motivo ? esc(motivo)
+          : cerrado ? 'El día está cerrado'
           : saludado ? 'Llegaste a las ' + horaDe(j.saludo_en)
           : 'Marca el inicio de tu jornada'}</span></span></button>
       <button class="accion" id="btnDescanso"
-        ${!saludado || descansado || cerrada || cerrado ? 'disabled' : ''}>
+        ${off || !saludado || descansado || cerrada ? 'disabled' : ''}>
         <span class="emo">${descansado ? '☕' : '🍽️'}</span>
         <span>${etiquetaDescanso}
-        <span class="sub">${descansado ? 'Descansaste a las ' + horaDe(j.descanso_en)
+        <span class="sub">${motivo ? esc(motivo)
+          : descansado ? 'Descansaste a las ' + horaDe(j.descanso_en)
+          : !saludado ? 'Primero hay que saludar'
           : 'Marca tu hora de descanso'}</span></span></button>
-      <button class="accion ${saludado && !cerrada && !cerrado ? 'cierre' : ''}" id="btnCerrar"
-        ${!saludado || cerrada || cerrado ? 'disabled' : ''}>
+      <button class="accion ${!off && saludado && !cerrada ? 'cierre' : ''}" id="btnCerrar"
+        ${off || !saludado || cerrada ? 'disabled' : ''}>
         <span class="emo">${cerrada ? '🏁' : '📕'}</span>
         <span>Misión cumplida
-        <span class="sub">${cerrada ? 'Cerraste a las ' + horaDe(j.cierre_en)
+        <span class="sub">${motivo ? esc(motivo)
+          : cerrada ? 'Cerraste a las ' + horaDe(j.cierre_en)
+          : !saludado ? 'Primero hay que saludar'
           : 'Marca tu salida'}</span></span></button></div>`;
-    if(j?.mision_reto){
-      h += `<div class="bloque" style="border-left:4px solid var(--rosa)">
-        <span class="lbl">tu misión de hoy</span>
-        <p style="font-size:.92rem;font-weight:600;line-height:1.4">${esc(j.mision_reto)}</p></div>`;
-    }
+
+    /* La zona de misión no desaparece nunca */
+    h += `<div class="bloque" style="border-left:4px solid var(--rosa)">
+      <span class="lbl">tu misión del día</span>
+      ${j?.mision_reto
+        ? `<p style="font-size:.94rem;font-weight:600;line-height:1.45">${esc(j.mision_reto)}</p>`
+        : `<p class="nota">${esHoy
+            ? 'Aparece cuando marques tu saludo.'
+            : (faltan > 0 ? `Faltan ${faltan} ${faltan===1?'día':'días'} para esta fecha.`
+                          : 'No hay misión registrada ese día.')}</p>`}
+    </div>`;
   }
 
   h += selectorLibrerias();
@@ -424,13 +488,14 @@ function vistaInicio(){
   const dentro = equipoDe(S.libreriaVista).filter(p => enSala(p.id));
   const titulo = l?.nombre?.includes('Salón') ? 'Libreros en el Salón' : 'En ' + (l?.nombre || 'sala');
   h += `<div class="bloque">
-    <span class="lbl">${esc(titulo)}${esHoy?'':' · '+esc(fechaCorta(S.fechaVista))}</span>
+    <span class="lbl">${esc(titulo)}${esHoy ? '' : ' · ' + esc(fechaCorta(S.fechaVista))}</span>
     ${dentro.length ? `<div class="en-sala">` + dentro.map(p =>
-        `<div class="uno">${avatar(p,44,estadoDe(p.id).clave)}<span>${esc(p.nombre_corto)}</span></div>`
-      ).join('') + `</div><p class="nota" style="margin-top:10px">${dentro.length}
+        `<div class="uno">${avatar(p,48,estadoDe(p.id).clave)}<span>${esc(p.nombre_corto)}</span></div>`
+      ).join('') + `</div><p class="nota" style="margin-top:12px">${dentro.length}
       ${dentro.length===1?'persona':'personas'} con jornada abierta.</p>`
     : `<p class="vacio">${esHoy ? 'Nadie ha marcado su saludo todavía.'
-        : 'Sin jornadas registradas ese día.'}</p>`}</div>`;
+        : (faltan > 0 ? `Faltan ${faltan} ${faltan===1?'día':'días'} para esta fecha.`
+                      : 'Sin jornadas registradas ese día.')}</p>`}</div>`;
 
   h += navegadorDias();
   h += bloqueParrillaDia(S.fechaVista);
@@ -465,34 +530,43 @@ function bloqueVentas(){
 
 function bloqueParrillaDia(fecha){
   const l = libDe(S.libreriaVista);
-  const ini = min(l?.apertura || '09:30'), fin = min(l?.cierre || '21:00');
+  const {ini, fin} = horarioDe(l, fecha);
   const span = fin - ini, pct = m => ((m - ini)/span*100);
   const gente = equipoDe(S.libreriaVista);
   const ahora = minutosAhora();
   const vivo = fecha === S.fecha && ahora >= ini - 30 && ahora <= fin;
   const marcas = []; for(let m = Math.ceil(ini/120)*120; m < fin; m += 120) marcas.push(m);
   const dn = diaEvento(l, fecha);
+  const grad = gradienteDia(ini, fin);
 
   let h = `<div class="bloque">
     <span class="lbl">turnos · ${esc(fechaLarga(fecha))}${dn ? ' · día '+dn+' de la fiesta' : ''}</span>
-    <div class="escala">${marcas.map(m => `<span style="left:${pct(m)}%">${fmtCorto(m)}</span>`).join('')}</div>`;
+    <div class="gantt-scroll"><div class="gantt">
+    <div class="escala">${marcas.map(m =>
+      `<span style="left:${pct(m)}%">${fmtCorto(m)}</span>`).join('')}</div>`;
 
   for(const p of gente){
     const t = turnoDe(p.id, fecha);
+    const e = estadoDe(p.id);
     h += `<div class="fila tocable" data-ver-persona="${p.id}">
-      <div class="quien">${esc(p.nombre_corto)}</div><div class="pista">`
+      <div class="quien">${avatar(p, 32, fecha === S.fecha ? e.clave : null)}
+        <b>${esc(p.nombre_corto)}</b></div>
+      <div class="pista">`
       + marcas.map(m => `<div class="g" style="left:${pct(m)}%"></div>`).join('');
     if(!t || !t.inicio || t.tipo === 'libre'){
-      h += `<div style="position:absolute;inset:0;display:flex;align-items:center;
-        padding-left:9px;font-size:.65rem;color:var(--tenue)">Libre</div>`;
+      h += `<div class="libre-txt">Libre</div>`;
     } else {
-      const a = min(t.inicio), b = min(t.fin);
-      h += `<div class="barra ${esc(t.tipo)}" style="left:${pct(a)}%;width:${pct(b)-pct(a)}%">
-        ${fmtCorto(a)}–${fmtCorto(b)}</div>`;
+      const a = Math.max(ini, min(t.inicio)), b = Math.min(fin, min(t.fin));
+      const L = pct(a), W = Math.max(0.1, pct(b) - pct(a));
+      let dentro = `<i class="grad" style="left:${(-L/W*100).toFixed(2)}%;
+        width:${(10000/W).toFixed(2)}%;background:${grad}"></i>`;
       if(t.descanso_inicio && t.descanso_min){
-        const d = min(t.descanso_inicio);
-        h += `<div class="descanso" style="left:${pct(d)}%;width:${pct(d+t.descanso_min)-pct(d)}%"></div>`;
+        const d0 = min(t.descanso_inicio), d1 = d0 + t.descanso_min;
+        dentro += `<div class="descanso" style="left:${((d0-a)/(b-a)*100).toFixed(2)}%;
+          width:${((d1-d0)/(b-a)*100).toFixed(2)}%"></div>`;
       }
+      h += `<div class="barra" style="left:${L}%;width:${W}%">${dentro}
+        <span class="etq">${fmtCorto(a)}–${fmtCorto(b)}</span></div>`;
     }
     if(vivo) h += `<div class="ahora-linea" style="left:${pct(Math.max(ini,Math.min(fin,ahora)))}%"></div>`;
     h += `</div></div>`;
@@ -504,12 +578,17 @@ function bloqueParrillaDia(fecha){
              : c.n >= mn+3 ? 'var(--tinta)' : 'var(--suave)';
     return `<i style="background:${bg}" title="${fmt(c.m)}: ${c.n}">${c.n}</i>`;
   }).join('') + `</div>
+  <div class="cob-lbl"><span class="lbl">personas en sala por media hora · mínimo ${mn}</span></div>
+  </div></div>
   <div class="leyenda">
-    <span>en sala · mínimo ${mn}</span>
-    <span><i style="background:var(--amarillo)"></i>mañana</span>
-    <span><i style="background:var(--cobalto)"></i>tarde</span>
-    <span><i style="background:var(--coral)"></i>completa</span>
-    <span><i style="background:var(--lima)"></i>compensación</span></div>
+    <span><i style="background:${FRANJA.manana}"></i>mañana</span>
+    <span><i style="background:${FRANJA.tarde}"></i>tarde</span>
+    <span><i style="background:${FRANJA.noche}"></i>noche</span>
+    <span><i style="background:repeating-linear-gradient(45deg,#bbb 0 3px,transparent 3px 6px)"></i>descanso</span>
+  </div>
+  <div class="btn-fila">
+    <button class="btn sec" data-cobertura="${fecha}">Cobertura del día</button>
+  </div>
   <p class="nota" style="margin-top:10px">Toca a alguien para ver todas sus jornadas.</p></div>`;
   return h;
 }
@@ -520,7 +599,7 @@ function fichaPersona(id){
   const l = libDe(p.libreria_id);
   const total = dias.reduce((s,d) => s + horasTurno(turnoDe(id,d)), 0);
   const v = modal(`
-    <div style="text-align:center">${avatar(p,56)}
+    <div style="text-align:center">${avatar(p,72)}
       <h3 style="margin-top:10px">${esc(p.nombre)}</h3>
       <p class="nota">${esc(l?.nombre||'')}${p.es_admin?' · coordinación':''}</p></div>
     <div class="bloque" style="margin-top:14px;background:var(--fondo)">
@@ -542,6 +621,55 @@ function fichaPersona(id){
   v.querySelector('#fpCerrar').onclick = () => v.remove();
 }
 
+
+/* Diagrama completo de cobertura, con exceso y déficit señalados. */
+function modalCobertura(fecha){
+  const l = libDe(S.libreriaVista);
+  const cob = cobertura(fecha), mn = minimoDe(fecha);
+  const tope = Math.max(mn + 3, ...cob.map(c => c.n), 1);
+  const holgado = mn + 3;
+
+  const juntar = filtro => {
+    const out = []; let act = null;
+    for(const c of cob){
+      if(filtro(c)){
+        if(act && act.fin === c.m){ act.fin = c.m + 30; act.n = Math.min(act.n, c.n); act.max = Math.max(act.max, c.n); }
+        else { act = {ini:c.m, fin:c.m+30, n:c.n, max:c.n}; out.push(act); }
+      } else act = null;
+    }
+    return out;
+  };
+  const falta = juntar(c => c.n < mn);
+  const sobra = juntar(c => c.n >= holgado);
+
+  const v = modal(`
+    <h3>Cobertura · ${esc(fechaLarga(fecha))}</h3>
+    <p class="nota" style="margin-top:6px">${esc(l?.nombre || '')} ·
+      mínimo de ${mn} ${mn===1?'persona':'personas'} en sala.</p>
+
+    ${falta.length ? falta.map(f => `<div class="alerta" style="margin-top:12px">
+        <b>Falta personal · ${fmt(f.ini)} a ${fmt(f.fin)}</b>
+        <p>Solo ${f.n} en sala. Faltan ${mn - f.n} para llegar al mínimo.</p></div>`).join('')
+      : `<div class="bien" style="margin-top:12px">Ninguna franja baja del mínimo.</div>`}
+
+    ${sobra.length ? sobra.map(f => `<div class="aviso" style="margin-top:10px;
+        border-left-color:var(--tinta)">
+        <b>Personal de sobra · ${fmt(f.ini)} a ${fmt(f.fin)}</b>
+        <p>Hasta ${f.max} en sala, ${f.max - mn} por encima del mínimo.
+        Es la franja de donde conviene mover gente si falta en otra.</p></div>`).join('') : ''}
+
+    <div class="cobmap">` + cob.map(c => {
+      const bg = c.n < mn-1 ? 'var(--coral)' : c.n < mn ? '#E2A03F'
+               : c.n >= holgado ? 'var(--tinta)' : 'var(--cobalto)';
+      return `<div class="cobrow"><span class="h">${fmtCorto(c.m)}</span>
+        <div class="b"><span style="width:${Math.max(6, c.n/tope*100)}%;background:${bg}">${c.n}</span>
+        <em style="left:${(mn/tope*100).toFixed(1)}%"></em></div></div>`;
+    }).join('') + `</div>
+    <p class="nota" style="margin-top:10px">La línea vertical marca el mínimo exigido.</p>
+    <div class="btn-fila"><button class="btn" style="flex:1" id="cbCerrar">Cerrar</button></div>`);
+  v.querySelector('#cbCerrar').onclick = () => v.remove();
+}
+
 /* =====================================================================
    FEED
    ===================================================================== */
@@ -554,7 +682,7 @@ function vistaFeed(){
   if(S.error) h += `<div class="alerta"><b>No se pudo cargar</b><p>${esc(S.error)}</p></div>`;
 
   if(S.yo){
-    h += `<div class="compositor">${avatar(S.yo,36)}
+    h += `<div class="compositor">${avatar(S.yo,40)}
       <textarea id="nuevoPost" maxlength="800"
         placeholder="Cuenta algo al equipo: una novedad, un dato, algo que pasó en sala…"></textarea></div>
       <div class="btn-fila" style="margin:0 0 6px;justify-content:flex-end">
@@ -587,7 +715,7 @@ function pintarPost(p){
   const l = libDe(per.libreria_id);
 
   if(p.retirada_en){
-    return `<div class="post retirada">${avatar(per,36)}<div class="cuerpo">
+    return `<div class="post retirada">${avatar(per,40)}<div class="cuerpo">
       <div class="cab"><b>${esc(per.nombre_corto)}</b></div>
       <div class="txt">Publicación retirada por la coordinación.</div></div></div>`;
   }
@@ -603,7 +731,7 @@ function pintarPost(p){
        data-reac="${p.id}" data-emoji="${e}">${e}<b>${n}</b></button>`).join('');
 
   return `<div class="post ${sistema?'sistema':''}">
-    ${avatar(per,36)}
+    ${avatar(per,40)}
     <div class="cuerpo">
       <div class="cab">
         <b>${esc(per.nombre_corto)}</b>
@@ -687,7 +815,7 @@ function vistaParrilla(){
     gente.map(p => {
       const hs = dias.reduce((s,d) => s + horasTurno(turnoDe(p.id,d)), 0);
       const n  = dias.filter(d => { const t = turnoDe(p.id,d); return t && t.inicio; }).length;
-      return `<li class="tocable" data-ver-persona="${p.id}">${avatar(p,36)}
+      return `<li class="tocable" data-ver-persona="${p.id}">${avatar(p,44)}
         <div class="info"><b>${esc(p.nombre)}</b><span>${n} jornadas</span></div>
         <div class="dato">${horas(hs)}</div></li>`;
     }).join('') + `</ul></div>`;
@@ -728,31 +856,52 @@ async function vistaPerfil(){
     sb.from('liquidaciones').select('*').eq('persona_id', p.id).order('creada_en',{ascending:false})
   ]);
   const J = jr.data || [], LQ = lq.data || [];
-  const pact = J.reduce((s,x) => s + (+x.horas_pactadas||0), 0);
+  const pact  = J.reduce((s,x) => s + (+x.horas_pactadas||0), 0);
   const extra = J.reduce((s,x) => s + (+x.extra_aprobada||0), 0);
-  const pend = J.filter(x => x.extra_estado === 'pendiente')
-                .reduce((s,x) => s + (+x.extra_calculada||0), 0);
+  const pend  = J.filter(x => x.extra_estado === 'pendiente')
+                 .reduce((s,x) => s + (+x.extra_calculada||0), 0);
+  const mis   = J.filter(x => x.mision_reto);
+  const logradas = mis.filter(x => x.mision_lograda === true).length;
 
-  let h = `<div class="bloque" style="text-align:center">
-    ${avatar(p,56, enSala(p.id) ? 'sala' : null)}
-    <h3 style="margin-top:10px">${esc(p.nombre)}</h3>
+  let h = `<div class="bloque perfil-cab">
+    ${avatar(p, 104, enSala(p.id) ? 'sala' : null)}
+    <h3>${esc(p.nombre)}</h3>
     <p class="nota">${esc(libDe(p.libreria_id)?.nombre||'')}${p.es_admin?' · coordinación':''}</p></div>`;
 
   h += `<div class="bloque"><span class="lbl">mis horas</span>
-    <div style="display:flex;gap:26px;flex-wrap:wrap">
-      <div><div style="font-size:1.9rem;font-weight:800;letter-spacing:-.04em">${horas(pact+extra)}</div>
+    <div style="display:flex;gap:30px;flex-wrap:wrap">
+      <div><div style="font-size:2rem;font-weight:800;letter-spacing:-.04em">${horas(pact+extra)}</div>
         <div class="lbl">acumuladas</div></div>
-      <div><div style="font-size:1.9rem;font-weight:800;letter-spacing:-.04em">${horas(extra)}</div>
-        <div class="lbl">extra aprobadas</div></div></div>
-    ${pend > 0 ? `<p class="nota" style="margin-top:10px">Tienes ${horas(pend)}
+      <div><div style="font-size:2rem;font-weight:800;letter-spacing:-.04em">${horas(extra)}</div>
+        <div class="lbl">extra aprobadas</div></div>
+      <div><div style="font-size:2rem;font-weight:800;letter-spacing:-.04em">${logradas}/${mis.length}</div>
+        <div class="lbl">misiones logradas</div></div></div>
+    ${pend > 0 ? `<p class="nota" style="margin-top:12px">Tienes ${horas(pend)}
       esperando aprobación de la coordinación.</p>` : ''}</div>`;
 
-  h += `<div class="bloque"><span class="lbl">mis misiones</span><ul class="lista">` +
-    (J.filter(x => x.mision_reto).slice(0,20).map(x => `<li><div class="info">
-      <b>${esc(fechaCorta(x.fecha))}</b><span>${esc(x.mision_reto)}</span></div>
-      <div class="dato">${x.cierre_en?'✓':'·'}</div></li>`).join('')
-      || `<li><div class="info"><span>Todavía no tienes misiones. Salen al saludar.</span></div></li>`)
-    + `</ul></div>`;
+  /* Equipo de trabajo de su librería */
+  const equipo = equipoDe(p.libreria_id);
+  h += `<div class="bloque"><span class="lbl">equipo de trabajo</span>
+    <div class="equipo">` + equipo.map(x => `<div class="uno">
+      ${avatar(x, 72, S.fechaVista === S.fecha ? estadoDe(x.id).clave : null)}
+      <b>${esc(x.nombre_corto)}</b>
+      <span>${x.es_admin ? 'coordinación' : 'librería'}</span></div>`).join('')
+    + `</div></div>`;
+
+  /* Misiones, marcables */
+  h += `<div class="bloque"><span class="lbl">mis misiones</span>`;
+  if(!mis.length) h += `<p class="nota">Todavía no tienes misiones. Salen al saludar.</p>`;
+  else h += mis.slice(0,25).map(x => `<div class="mis-fila">
+      <b style="font-size:.76rem;font-family:var(--mono);color:var(--tenue)">
+        ${esc(fechaCorta(x.fecha))}</b>
+      <div class="txt">${esc(x.mision_reto)}</div>
+      <div class="mis-acc">
+        <button class="si ${x.mision_lograda === true ? 'on':''}"
+          data-mision="${x.fecha}" data-val="1">✓ Lograda</button>
+        <button class="no ${x.mision_lograda === false ? 'on':''}"
+          data-mision="${x.fecha}" data-val="0">Esta vez no</button>
+      </div></div>`).join('');
+  h += `</div>`;
 
   h += `<div class="bloque"><span class="lbl">mis jornadas</span><ul class="lista">` +
     (J.slice(0,20).map(x => `<li><div class="info"><b>${esc(fechaLarga(x.fecha))}</b>
@@ -881,6 +1030,150 @@ function enlazarDeslizador(cont, id, descanso, alSoltar){
   });
 }
 
+
+/* =====================================================================
+   MÓDULO DE FERIA · por librería
+   ===================================================================== */
+function estadoFeria(l, hoy){
+  if(!l?.evento_inicio || !l?.evento_fin) return null;
+  const a = Date.parse(hoy+'T00:00:00Z');
+  const i = Date.parse(l.evento_inicio+'T00:00:00Z');
+  const f = Date.parse(l.evento_fin+'T00:00:00Z');
+  const total = Math.round((f-i)/86400000) + 1;
+  if(a < i) return {fase:'antes', faltan: Math.round((i-a)/86400000), total};
+  if(a > f) return {fase:'despues', total};
+  return {fase:'durante', dia: Math.round((a-i)/86400000) + 1, total};
+}
+
+function tarjetaFeria(l, resumen){
+  const e = estadoFeria(l, S.fecha);
+  if(!l?.modo_fiesta || !e) return '';
+  const cab = e.fase === 'antes'
+      ? `Faltan ${e.faltan} ${e.faltan===1?'día':'días'} para empezar`
+    : e.fase === 'durante'
+      ? `Día ${e.dia} de ${e.total}`
+      : 'Edición terminada';
+  const meta = l.meta_evento_ejemplares;
+  const ej = resumen?.ejemplares ?? 0, ing = resumen?.ingresos ?? 0;
+  return `<div class="feria-cab">
+    <span class="lbl">modo feria · ${esc(l.nombre)}</span>
+    <h3>${esc(l.evento_nombre || 'Evento sin nombre')}</h3>
+    <p>${esc(l.evento_ciudad || '')}${l.evento_sede ? ' · ' + esc(l.evento_sede) : ''}<br>
+      ${esc(fechaCorta(l.evento_inicio))} a ${esc(fechaCorta(l.evento_fin))} · ${e.total} días · ${cab}</p>
+    <div class="feria-datos">
+      <div><b>${ej}</b><span>ejemplares${meta ? ' de ' + meta : ''}</span></div>
+      <div><b>${pesos(ing)}</b><span>en ventas</span></div>
+      <div><b>${horas(resumen?.horas ?? 0)}</b><span>trabajadas</span></div>
+    </div>
+    ${l.evento_montaje ? `<p style="margin-top:12px">${esc(l.evento_montaje)}${
+      l.evento_desmontaje ? ' · ' + esc(l.evento_desmontaje) : ''}</p>` : ''}
+  </div>`;
+}
+
+function formFeria(l){
+  const e = estadoFeria(l, S.fecha);
+  const v = modal(`<h3>Modo feria · ${esc(l.nombre)}</h3>
+    <p class="nota" style="margin-top:6px">Cada librería lleva su propio evento,
+    con sus metas y su consolidado. Al apagarlo, la cabecera vuelve a mostrar solo la fecha.</p>
+
+    <label class="campo" style="display:flex;align-items:center;gap:8px;text-transform:none;
+      letter-spacing:0;font-size:.88rem;font-family:'Archivo';font-weight:600">
+      <input type="checkbox" id="ffOn"${l.modo_fiesta?' checked':''}> Modo feria encendido</label>
+
+    <label class="campo" for="ffNom">Nombre de la feria o evento</label>
+    <input type="text" id="ffNom" value="${esc(l.evento_nombre||'')}"
+      placeholder="Fiesta del Libro y la Cultura de Medellín 2026">
+    <label class="campo" for="ffCiu">Ciudad</label>
+    <input type="text" id="ffCiu" value="${esc(l.evento_ciudad||'')}" placeholder="Medellín">
+    <label class="campo" for="ffSed">Sede o pabellón</label>
+    <input type="text" id="ffSed" value="${esc(l.evento_sede||'')}"
+      placeholder="Jardín Botánico · Carpa del Salón">
+
+    <label class="campo" for="ffIni">Fecha de inicio</label>
+    <input type="date" id="ffIni" value="${l.evento_inicio||''}">
+    <label class="campo" for="ffFin">Fecha de finalización</label>
+    <input type="date" id="ffFin" value="${l.evento_fin||''}">
+    <p class="nota" id="ffDur" style="margin-top:8px">${e ? e.total + ' días de duración.' : ''}</p>
+
+    <label class="campo" for="ffAp">Horario de feria · apertura</label>
+    <input type="time" id="ffAp" value="${l.feria_apertura?.slice(0,5)||''}">
+    <label class="campo" for="ffCi">Horario de feria · cierre</label>
+    <input type="time" id="ffCi" value="${l.feria_cierre?.slice(0,5)||''}">
+    <p class="nota" style="margin-top:8px">Si los dejas vacíos rige el horario normal de la librería.</p>
+
+    <label class="campo" for="ffMon">Nota de montaje</label>
+    <input type="text" id="ffMon" value="${esc(l.evento_montaje||'')}"
+      placeholder="Montaje el 11 desde las 8:30 a. m.">
+    <label class="campo" for="ffDes">Nota de desmontaje</label>
+    <input type="text" id="ffDes" value="${esc(l.evento_desmontaje||'')}">
+
+    <label class="campo" for="ffMe">Meta de ejemplares del evento</label>
+    <input type="number" id="ffMe" value="${l.meta_evento_ejemplares ?? ''}">
+    <label class="campo" for="ffMi">Meta de ingresos del evento</label>
+    <input type="number" id="ffMi" step="100000" value="${l.meta_evento_ingresos ?? ''}">
+    <label class="campo" for="ffMd">Meta diaria de ejemplares (para comparar el cierre de caja)</label>
+    <input type="number" id="ffMd" value="${l.meta_ejemplares ?? ''}">
+
+    <div class="err" id="ffErr"></div>
+    <div class="btn-fila">
+      <button class="btn" style="flex:1" id="ffGuardar">Guardar</button>
+      <button class="btn sec" id="ffCancelar">Cancelar</button></div>
+    ${e && e.fase === 'despues' ? `<div class="btn-fila">
+      <button class="btn peligro mini" id="ffArchivar">Archivar esta edición</button></div>
+      <p class="nota" style="margin-top:8px">Guarda el resumen final, apaga el modo feria
+      y deja la librería lista para el próximo evento.</p>` : ''}`);
+
+  const recalcular = () => {
+    const a = v.querySelector('#ffIni').value, b = v.querySelector('#ffFin').value;
+    if(a && b){
+      const n = Math.round((Date.parse(b+'T00:00:00Z') - Date.parse(a+'T00:00:00Z'))/86400000) + 1;
+      v.querySelector('#ffDur').textContent = n > 0 ? n + ' días de duración.'
+        : 'La fecha de finalización debe ser posterior.';
+    }
+  };
+  v.querySelector('#ffIni').onchange = recalcular;
+  v.querySelector('#ffFin').onchange = recalcular;
+  v.querySelector('#ffCancelar').onclick = () => v.remove();
+
+  v.querySelector('#ffGuardar').onclick = async () => {
+    const num = id => { const x = v.querySelector(id).value; return x === '' ? null : +x; };
+    const on = v.querySelector('#ffOn').checked;
+    const ini = v.querySelector('#ffIni').value || null;
+    const fin = v.querySelector('#ffFin').value || null;
+    if(on && (!ini || !fin))
+      return v.querySelector('#ffErr').textContent = 'Para encender el modo feria hacen falta las dos fechas.';
+    if(ini && fin && fin < ini)
+      return v.querySelector('#ffErr').textContent = 'La fecha de finalización debe ser posterior.';
+
+    const r = await sb.from('librerias').update({
+      modo_fiesta: on,
+      evento_nombre: v.querySelector('#ffNom').value.trim() || null,
+      evento_ciudad: v.querySelector('#ffCiu').value.trim() || null,
+      evento_sede:   v.querySelector('#ffSed').value.trim() || null,
+      evento_inicio: ini, evento_fin: fin,
+      feria_apertura: v.querySelector('#ffAp').value || null,
+      feria_cierre:   v.querySelector('#ffCi').value || null,
+      evento_montaje:    v.querySelector('#ffMon').value.trim() || null,
+      evento_desmontaje: v.querySelector('#ffDes').value.trim() || null,
+      meta_evento_ejemplares: num('#ffMe'),
+      meta_evento_ingresos:   num('#ffMi'),
+      meta_ejemplares:        num('#ffMd')
+    }).eq('id', l.id);
+    if(r.error) return v.querySelector('#ffErr').textContent = r.error.message;
+    v.remove(); brindis(on ? 'Modo feria actualizado' : 'Modo feria apagado');
+    await cargarBase(); render();
+  };
+
+  const arch = v.querySelector('#ffArchivar');
+  if(arch) arch.onclick = async () => {
+    if(!confirm('Se guarda el resumen de la edición y se apaga el modo feria. ¿Seguimos?')) return;
+    const r = await sb.rpc('archivar_feria', { p_libreria: l.id });
+    if(r.error) return v.querySelector('#ffErr').textContent = r.error.message;
+    v.remove(); brindis('Edición archivada');
+    await cargarBase(); render();
+  };
+}
+
 /* =====================================================================
    PANEL DE GESTIÓN
    ===================================================================== */
@@ -889,20 +1182,28 @@ async function vistaAdmin(){
   const gente = equipoDe(S.libreriaVista);
   const cerrado = !!S.dia?.cerrado;
 
+  let resumen = null;
+  if(l?.modo_fiesta){
+    const r = await sb.rpc('resumen_evento', { p_libreria: S.libreriaVista });
+    resumen = Array.isArray(r.data) ? r.data[0] : r.data;
+  }
+
   let h = `<div class="bloque">
     <span class="lbl">gestionando</span>
     <select id="admLib">${S.librerias.map(x =>
       `<option value="${x.id}"${x.id===S.libreriaVista?' selected':''}>${esc(x.nombre)}</option>`).join('')}</select>
-    <label class="campo" style="display:flex;align-items:center;gap:8px;text-transform:none;
-      letter-spacing:0;font-size:.86rem;font-family:'Archivo';font-weight:600">
-      <input type="checkbox" id="togFiesta"${l?.modo_fiesta?' checked':''}> Modo fiesta encendido</label>
-    <p class="nota">${l?.modo_fiesta
-      ? `La cabecera cuenta los días de ${esc(l.evento_nombre || 'el evento')}.
-         Apágalo y solo se verá la fecha.`
-      : 'Apagado: la cabecera muestra solo la fecha. Enciéndelo para contar los días de un evento.'}</p>
     <div class="btn-fila">
       <button class="btn sec mini" id="editarLib">Configurar esta librería</button>
       <button class="btn sec mini" id="nuevaLib">Crear librería</button></div></div>`;
+
+  h += tarjetaFeria(l, resumen);
+  h += `<div class="bloque"><span class="lbl">modo feria</span>
+    <h3>${l?.modo_fiesta ? 'Encendido' : 'Apagado'}</h3>
+    <p class="nota">${l?.modo_fiesta
+      ? 'La cabecera cuenta los días del evento y la parrilla se ancla a sus fechas.'
+      : 'La cabecera muestra solo la fecha y la parrilla trabaja por semanas.'}</p>
+    <div class="btn-fila"><button class="btn" id="abrirFeria">
+      ${l?.modo_fiesta ? 'Configurar la feria' : 'Activar modo feria'}</button></div></div>`;
 
   h += navegadorDias();
 
@@ -918,7 +1219,9 @@ async function vistaAdmin(){
   h += `<div class="bloque"><span class="lbl">cobertura · ${esc(fechaLarga(S.fechaVista))}</span>`
     + (flojas.length ? flojas.map(f => `<div class="alerta"><b>${fmt(f.ini)} a ${fmt(f.fin)}</b>
         <p>Solo ${f.n} en sala, por debajo del mínimo de ${mn}.</p></div>`).join('')
-      : `<div class="bien">Todas las franjas cumplen el mínimo de ${mn}.</div>`) + `</div>`;
+      : `<div class="bien">Todas las franjas cumplen el mínimo de ${mn}.</div>`)
+    + `<div class="btn-fila"><button class="btn sec" data-cobertura="${S.fechaVista}">
+        Ver diagrama de cobertura</button></div></div>`;
 
   h += `<div class="bloque"><span class="lbl">cierre del día · ${esc(fechaLarga(S.fechaVista))}</span>
     <h3>${cerrado ? 'Día cerrado' : 'Día abierto'}</h3>
@@ -952,7 +1255,7 @@ async function vistaAdmin(){
   else h += pend.map(j => {
     const p = perDe(j.persona_id);
     return `<div style="display:flex;align-items:center;gap:11px;padding:11px 0;
-      border-bottom:1px solid var(--linea)">${avatar(p,36)}
+      border-bottom:1px solid var(--linea)">${avatar(p,44)}
       <div style="flex:1;min-width:0"><b style="font-size:.84rem">${esc(p?.nombre_corto)}</b>
         <div class="nota">Cerró a las ${horaDe(j.cierre_en)} · calculadas ${horas(j.extra_calculada)}</div>
         <div class="pasos" style="margin-top:6px"><button data-menos="${j.id}">−</button>
@@ -967,7 +1270,7 @@ async function vistaAdmin(){
   h += `<div class="bloque"><span class="lbl">personal de ${esc(l?.nombre)}</span><ul class="lista">` +
     gente.map(p => {
       const e = estadoDe(p.id), j = jornadaDe(p.id);
-      return `<li>${avatar(p,36,e.clave)}
+      return `<li>${avatar(p,44,e.clave)}
         <div class="info"><b>${esc(p.nombre)}${p.es_admin?' · coordinación':''}</b>
         <span>${esc(e.txt)}${p.correo?'':' · sin correo, no puede entrar'}</span>
         ${j ? `<div class="btn-fila" style="margin-top:6px;gap:6px">
@@ -1015,14 +1318,19 @@ async function panelHorarios(){
 
   const v = modal(`<h3>Administrar horarios</h3>
     <p class="nota" style="margin-top:6px">Elige cualquier día del calendario y mueve los dos
-    topes de cada jornada. La app avisa si la sala queda floja, pero nunca te lo impide.</p>
+    topes de cada jornada. Los cambios no se guardan hasta que pulses Guardar.</p>
     <label class="campo" for="hDia">Día</label>
     <input type="date" id="hDia" value="${S.fechaVista}">
-    <div id="hLista" style="margin-top:8px;max-height:46vh;overflow-y:auto"></div>
-    <div id="hAviso" style="margin-top:10px"></div>
-    <div class="btn-fila"><button class="btn" style="flex:1" id="hCerrar">Listo</button></div>`);
+    <div id="hLista" style="margin-top:10px;max-height:44vh;overflow-y:auto"></div>
+    <div id="hAviso" style="margin-top:12px"></div>
+    <div class="btn-fila">
+      <button class="btn" style="flex:1" id="hGuardar" disabled>Guardar</button>
+      <button class="btn sec" id="hCob">Cobertura</button>
+      <button class="btn sec" id="hCerrar">Cerrar</button></div>
+    <p class="nota" id="hEstado" style="margin-top:8px"></p>`);
 
-  let turnosDia = [];
+  let turnosDia = [];      // lo que hay en la base
+  let borrador  = {};      // {persona_id: {ini,fin,desc,libre}}  cambios sin guardar
 
   const traer = async () => {
     const dia = v.querySelector('#hDia').value;
@@ -1031,79 +1339,90 @@ async function panelHorarios(){
       ? await sb.from('turnos').select('*').in('persona_id', ids).eq('fecha', dia)
       : {data:[]};
     turnosDia = r.data || [];
+    borrador = {};
   };
 
-  const guardar = async (personaId, dia, a, b, desc) => {
-    const t = turnosDia.find(x => x.persona_id === personaId);
-    const desfase = (t?.descanso_inicio && t?.inicio)
-      ? min(t.descanso_inicio) - min(t.inicio)
-      : Math.round((b - a)/2 - desc/2);
-    const fila = {
-      persona_id: personaId, fecha: dia,
-      tipo: (t?.tipo && t.tipo !== 'libre') ? t.tipo : 'personalizado',
-      inicio: hhmm(a), fin: hhmm(b),
-      descanso_inicio: desc ? hhmm(Math.min(b - desc, a + Math.max(0, desfase))) : null,
-      descanso_min: desc, fijo: true, aprobado: true, actualizado_por: S.yo.id
-    };
-    const r = await sb.from('turnos').upsert(fila, { onConflict:'persona_id,fecha' })
-      .select().single();
-    if(r.error) return brindis(r.error.message);
-    const i = turnosDia.findIndex(x => x.persona_id === personaId);
-    if(i >= 0) turnosDia[i] = r.data; else turnosDia.push(r.data);
-    avisar();
+  /* Estado actual de una persona: el borrador si lo tocaron, si no la base. */
+  const actual = p => {
+    if(borrador[p.id]) return borrador[p.id];
+    const t = turnosDia.find(x => x.persona_id === p.id);
+    if(t && t.inicio && t.tipo !== 'libre')
+      return {ini:min(t.inicio), fin:min(t.fin), desc:t.descanso_min ?? 0, libre:false, tipo:t.tipo,
+              desfase: t.descanso_inicio ? min(t.descanso_inicio) - min(t.inicio) : null};
+    return {libre:true};
+  };
+
+  const contar = () => Object.keys(borrador).length;
+  const refrescarBotones = () => {
+    const n = contar();
+    v.querySelector('#hGuardar').disabled = n === 0;
+    v.querySelector('#hGuardar').textContent = n ? `Guardar ${n} cambio${n>1?'s':''}` : 'Guardar';
+    v.querySelector('#hEstado').innerHTML = n
+      ? `<span class="pendiente">${n} cambio${n>1?'s':''} sin guardar</span>`
+      : 'Sin cambios pendientes.';
   };
 
   const dibujar = () => {
-    const dia = v.querySelector('#hDia').value;
     v.querySelector('#hLista').innerHTML = gente.map(p => {
-      const t = turnosDia.find(x => x.persona_id === p.id);
-      const tiene = t && t.inicio && t.tipo !== 'libre';
-      const a = tiene ? min(t.inicio) : min(l?.apertura || '09:30');
-      const b = tiene ? min(t.fin)
-                      : Math.min(TOPE_FIN, a + (+p.horas_dia)*60 + descPorDefecto);
-      const desc = tiene ? (t.descanso_min ?? 0) : descPorDefecto;
+      const a = actual(p);
+      const tocado = !!borrador[p.id];
+      if(a.libre){
+        return `<div class="persona-fila">
+          <div style="display:flex;align-items:center;gap:10px">
+            ${avatar(p,32)}<b style="font-size:.84rem;flex:1">${esc(p.nombre_corto)}
+            ${tocado?'<span class="pendiente"> ·  sin guardar</span>':''}</b>
+            <button class="btn sec mini" data-asignar="${p.id}">Asignar turno</button></div>
+          <p class="nota" style="margin-top:4px">Sin turno este día.</p></div>`;
+      }
       return `<div class="persona-fila">
-        <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
-          ${avatar(p,28)}<b style="font-size:.82rem;flex:1">${esc(p.nombre_corto)}</b>
-          ${tiene ? `<button class="btn sec mini" data-librar="${p.id}">Dejar libre</button>`
-                  : `<button class="btn sec mini" data-asignar="${p.id}">Asignar turno</button>`}
-        </div>
-        ${tiene ? deslizador(p.id, a, b, desc) : `<p class="nota">Sin turno este día.</p>`}
-      </div>`;
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+          ${avatar(p,32)}<b style="font-size:.84rem;flex:1">${esc(p.nombre_corto)}
+          ${tocado?'<span class="pendiente"> ·  sin guardar</span>':''}</b>
+          <button class="btn sec mini" data-librar="${p.id}">Dejar libre</button></div>
+        ${deslizador(p.id, a.ini, a.fin, a.desc)}</div>`;
     }).join('');
 
     gente.forEach(p => {
-      const t = turnosDia.find(x => x.persona_id === p.id);
-      if(!t || !t.inicio || t.tipo === 'libre') return;
-      enlazarDeslizador(v, p.id, t.descanso_min ?? 0,
-        (a,b) => guardar(p.id, dia, a, b, t.descanso_min ?? 0));
+      const a = actual(p);
+      if(a.libre) return;
+      enlazarDeslizador(v, p.id, a.desc, (x,y) => {
+        borrador[p.id] = {...a, ini:x, fin:y};
+        refrescarBotones(); avisar();
+      });
     });
 
-    v.querySelectorAll('[data-asignar]').forEach(btn => btn.onclick = async () => {
+    v.querySelectorAll('[data-asignar]').forEach(btn => btn.onclick = () => {
       const p = gente.find(x => x.id === btn.dataset.asignar);
-      const ini = min(l?.apertura || '09:30');
-      await guardar(p.id, dia, ini,
-        Math.min(TOPE_FIN, ini + (+p.horas_dia)*60 + descPorDefecto), descPorDefecto);
-      dibujar();
+      const {ini, fin} = horarioDe(l, v.querySelector('#hDia').value);
+      borrador[p.id] = { ini, fin: Math.min(fin, ini + (+p.horas_dia)*60 + descPorDefecto),
+                         desc: descPorDefecto, libre:false, tipo:'personalizado', desfase:null };
+      dibujar(); refrescarBotones();
     });
-    v.querySelectorAll('[data-librar]').forEach(btn => btn.onclick = async () => {
-      await sb.from('turnos').upsert({ persona_id:btn.dataset.librar, fecha:dia, tipo:'libre',
-        inicio:null, fin:null, descanso_inicio:null, descanso_min:0, fijo:true,
-        actualizado_por:S.yo.id }, { onConflict:'persona_id,fecha' });
-      await traer(); dibujar();
+    v.querySelectorAll('[data-librar]').forEach(btn => btn.onclick = () => {
+      borrador[btn.dataset.librar] = { libre:true };
+      dibujar(); refrescarBotones();
     });
-    avisar();
+    refrescarBotones(); avisar();
   };
+
+  /* Cobertura calculada sobre lo que se ve, borrador incluido. */
+  const turnosVista = () => gente.map(p => {
+    const a = actual(p);
+    if(a.libre) return null;
+    return { persona_id:p.id, inicio:hhmm(a.ini), fin:hhmm(a.fin),
+      descanso_inicio: a.desc ? hhmm(Math.min(a.fin - a.desc,
+        a.ini + (a.desfase ?? Math.round((a.fin-a.ini)/2 - a.desc/2)))) : null,
+      descanso_min: a.desc, tipo:'x' };
+  }).filter(Boolean);
 
   const avisar = () => {
     const dia = v.querySelector('#hDia').value;
     const mn = (dowDe(dia)===0||dowDe(dia)===6) ? (l?.minimo_finde ?? 4) : (l?.minimo_semana ?? 3);
-    const ap = min(l?.apertura||'09:30'), ci = min(l?.cierre||'21:00');
+    const {ini:ap, fin:ci} = horarioDe(l, dia);
     const flojas = [];
     for(let m = ap; m < ci; m += 30){
       let n = 0;
-      for(const t of turnosDia){
-        if(!t.inicio || t.tipo === 'libre') continue;
+      for(const t of turnosVista()){
         const a = min(t.inicio), b = min(t.fin);
         if(m < a || m >= b) continue;
         if(t.descanso_inicio){ const d = min(t.descanso_inicio);
@@ -1120,9 +1439,38 @@ async function panelHorarios(){
       : `<div class="bien">La cobertura de este día cumple el mínimo de ${mn}.</div>`;
   };
 
-  v.querySelector('#hDia').onchange = async () => { await traer(); dibujar(); };
+  v.querySelector('#hGuardar').onclick = async () => {
+    const dia = v.querySelector('#hDia').value;
+    const btn = v.querySelector('#hGuardar'); btn.disabled = true; btn.textContent = 'Guardando…';
+    const filas = Object.entries(borrador).map(([id, a]) => a.libre
+      ? { persona_id:id, fecha:dia, tipo:'libre', inicio:null, fin:null,
+          descanso_inicio:null, descanso_min:0, fijo:true, aprobado:true, actualizado_por:S.yo.id }
+      : { persona_id:id, fecha:dia, tipo: a.tipo && a.tipo !== 'libre' ? a.tipo : 'personalizado',
+          inicio:hhmm(a.ini), fin:hhmm(a.fin),
+          descanso_inicio: a.desc ? hhmm(Math.min(a.fin - a.desc,
+            a.ini + (a.desfase ?? Math.round((a.fin-a.ini)/2 - a.desc/2)))) : null,
+          descanso_min:a.desc, fijo:true, aprobado:true, actualizado_por:S.yo.id });
+    const r = await sb.from('turnos').upsert(filas, { onConflict:'persona_id,fecha' });
+    if(r.error){ brindis(r.error.message); refrescarBotones(); return; }
+    brindis(filas.length + (filas.length>1 ? ' turnos guardados' : ' turno guardado'));
+    await traer(); dibujar();
+  };
+
+  v.querySelector('#hCob').onclick = async () => {
+    if(contar()) brindis('Guarda primero para ver la cobertura definitiva');
+    S.fechaVista = v.querySelector('#hDia').value;
+    await cargarLibreria(); modalCobertura(S.fechaVista);
+  };
+
+  v.querySelector('#hDia').onchange = async () => {
+    if(contar() && !confirm('Hay cambios sin guardar. ¿Cambiar de día y perderlos?')) return;
+    await traer(); dibujar();
+  };
   v.querySelector('#hCerrar').onclick = async () => {
-    v.remove(); await cargarLibreria(); render(); };
+    if(contar() && !confirm('Hay cambios sin guardar. ¿Cerrar y perderlos?')) return;
+    v.remove(); await cargarLibreria(); render();
+  };
+
   await traer(); dibujar();
 }
 
@@ -1367,6 +1715,16 @@ function formLibreria(l){
 /* =====================================================================
    RENDER
    ===================================================================== */
+/* La cabecera se pega justo debajo del menú. Medir su alto real evita
+   el hueco transparente que se veía en escritorio. */
+function medirBarra(){
+  const nav = document.getElementById('tabs');
+  const abajo = getComputedStyle(nav).position === 'fixed';   // en móvil va al pie
+  document.documentElement.style.setProperty('--alto-tabs',
+    (abajo || nav.classList.contains('oculto')) ? '0px' : nav.offsetHeight + 'px');
+}
+window.addEventListener('resize', medirBarra);
+
 async function render(){
   document.getElementById('tabs').classList.remove('oculto');
   document.getElementById('cabecera').classList.remove('oculto');
@@ -1374,6 +1732,7 @@ async function render(){
   document.querySelectorAll('nav.tabs button').forEach(b =>
     b.classList.toggle('act', b.dataset.v === S.vista));
   pintarCabecera();
+  medirBarra();
 
   const app = document.getElementById('app');
   app.innerHTML = S.vista === 'inicio'   ? vistaInicio()
@@ -1449,21 +1808,40 @@ function enlazar(){
 
   on('salir', async () => { await sb.auth.signOut(); location.reload(); });
 
+  /* saltar a cualquier fecha del calendario */
+  const sf = el('saltarFecha');
+  if(sf) sf.onchange = async () => {
+    if(!sf.value) return;
+    S.fechaVista = sf.value;
+    if(S.fechaVista < S.rango[0] || S.fechaVista > S.rango[1]){
+      const d = new Date(S.fechaVista+'T12:00:00Z');
+      const lun = masDias(S.fechaVista, -((d.getUTCDay()+6)%7));
+      S.rango = [ Math.min(lun, S.fechaVista) === lun ? lun : S.fechaVista, masDias(lun, 6) ];
+    }
+    await cargarLibreria(); render();
+  };
+  on('volverHoy', async () => {
+    S.fechaVista = S.fecha; calcularRango(); await cargarLibreria(); render(); });
+
+  /* diagrama de cobertura */
+  document.querySelectorAll('[data-cobertura]').forEach(b =>
+    b.onclick = () => modalCobertura(b.dataset.cobertura));
+
+  /* misiones logradas */
+  document.querySelectorAll('[data-mision]').forEach(b => b.onclick = async () => {
+    const r = await sb.rpc('marcar_mision', { p_fecha: b.dataset.mision,
+      p_lograda: b.dataset.val === '1' });
+    if(r.error) return brindis(r.error.message);
+    brindis(b.dataset.val === '1' ? '¡Misión lograda!' : 'Anotado, será mañana');
+    render();
+  });
+
+  /* módulo de feria */
+  on('abrirFeria', () => formFeria(libDe(S.libreriaVista)));
+
   const sl = el('admLib');
   if(sl) sl.onchange = async () => { S.libreriaVista = sl.value; calcularRango();
     await cargarLibreria(); render(); };
-  const tf = el('togFiesta');
-  if(tf) tf.onchange = async () => {
-    const l = libDe(S.libreriaVista);
-    if(tf.checked && !l.evento_inicio){
-      tf.checked = false;
-      brindis('Primero define el evento y sus fechas');
-      return formLibreria(l);
-    }
-    await sb.from('librerias').update({ modo_fiesta: tf.checked }).eq('id', S.libreriaVista);
-    brindis(tf.checked ? 'Modo fiesta encendido' : 'Modo fiesta apagado');
-    await cargarBase(); render();
-  };
   on('nuevaLib', () => formLibreria(null));
   on('editarLib', () => formLibreria(libDe(S.libreriaVista)));
   on('nuevaPersona', () => formPersona(null));
