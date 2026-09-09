@@ -94,7 +94,7 @@ header.top{position:sticky;top:0;z-index:40;background:var(--fondo);
 .av-36 .ini{font-size:.75rem}.av-28 .ini{font-size:.6rem}
 
 /* ---------- bloques ---------- */
-main{padding-top:16px}
+main{padding-top:24px}
 .bloque{background:var(--superficie);border:1px solid var(--linea);
   border-radius:var(--r);padding:16px;margin-bottom:12px}
 .bloque > .lbl{display:block;margin-bottom:10px}
@@ -281,6 +281,74 @@ nav.tabs button.act svg{stroke-width:2.2}
   text-transform:uppercase;color:var(--tenue)}
 .pie .marca{font-family:Georgia,'Times New Roman',serif;font-size:.86rem;
   letter-spacing:.18em;color:var(--suave);margin-top:4px}
+
+
+/* ---------- navegador de días ---------- */
+.dias-nav{display:flex;gap:6px;overflow-x:auto;padding:2px 0 14px;
+  scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.dias-nav::-webkit-scrollbar{display:none}
+.dia-chip{flex:0 0 auto;min-width:52px;text-align:center;padding:7px 9px;
+  border:1px solid var(--linea-fuerte);border-radius:10px;background:var(--superficie);
+  line-height:1.2}
+.dia-chip b{display:block;font-size:1.02rem;font-weight:800;letter-spacing:-.03em}
+.dia-chip i{display:block;font-style:normal;font-family:var(--mono);font-size:.55rem;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--tenue)}
+.dia-chip .dn{display:block;font-family:var(--mono);font-size:.5rem;
+  letter-spacing:.06em;color:var(--tenue);margin-top:2px}
+.dia-chip.sel{background:var(--cobalto);border-color:var(--cobalto);color:#fff}
+.dia-chip.sel i,.dia-chip.sel .dn{color:rgba(255,255,255,.75)}
+.dia-chip.hoy{border-color:var(--coral);border-width:1.5px}
+.dia-chip.hoy.sel{border-color:var(--cobalto)}
+
+/* selector de librería en línea */
+.sel-lib{display:flex;gap:6px;overflow-x:auto;padding-bottom:12px;
+  scrollbar-width:none}
+.sel-lib::-webkit-scrollbar{display:none}
+.sel-lib button{flex:0 0 auto;font-size:.72rem;font-weight:600;padding:7px 13px;
+  border-radius:999px;border:1px solid var(--linea-fuerte);background:var(--superficie);
+  white-space:nowrap}
+.sel-lib button.act{color:#fff}
+
+/* ---------- reacciones ---------- */
+.reacs{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;align-items:center}
+.reac{display:inline-flex;align-items:center;gap:4px;font-size:.74rem;
+  padding:3px 9px;border-radius:999px;border:1px solid var(--linea-fuerte);
+  background:var(--superficie);line-height:1.3}
+.reac.mia{border-color:var(--cobalto);background:#EDF4FB}
+.reac b{font-family:var(--mono);font-size:.62rem;font-weight:700;color:var(--suave)}
+.reac.mia b{color:var(--cobalto)}
+.reac-mas{font-size:.72rem;color:var(--tenue);padding:3px 8px;border-radius:999px;
+  border:1px dashed var(--linea-fuerte)}
+.paleta{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.paleta button{font-size:1.15rem;padding:3px 6px;border-radius:8px;line-height:1}
+.paleta button:hover{background:var(--fondo)}
+
+/* ---------- doble deslizador de jornada ---------- */
+.rango{position:relative;height:34px;margin-top:10px}
+.rango .via{position:absolute;top:14px;left:0;right:0;height:6px;border-radius:3px;
+  background:var(--linea)}
+.rango .activo{position:absolute;top:14px;height:6px;border-radius:3px;background:var(--cobalto)}
+.rango input[type=range]{position:absolute;top:8px;left:0;width:100%;height:18px;
+  margin:0;padding:0;border:none;background:none;pointer-events:none;-webkit-appearance:none;
+  appearance:none}
+.rango input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;pointer-events:auto;
+  width:22px;height:22px;border-radius:50%;background:var(--superficie);
+  border:2.5px solid var(--cobalto);cursor:grab;box-shadow:0 1px 4px rgba(0,0,0,.18)}
+.rango input[type=range]::-moz-range-thumb{pointer-events:auto;width:20px;height:20px;
+  border-radius:50%;background:var(--superficie);border:2.5px solid var(--cobalto);
+  cursor:grab;box-shadow:0 1px 4px rgba(0,0,0,.18)}
+.rango input[type=range]::-moz-range-track{background:none;border:none}
+.rango-cab{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.rango-cab .franja{font-family:var(--mono);font-size:.74rem;font-weight:700}
+.rango-cab .cuantas{font-family:var(--mono);font-size:.66rem;color:var(--suave)}
+.rango-topes{display:flex;justify-content:space-between;font-family:var(--mono);
+  font-size:.54rem;color:var(--tenue);margin-top:-4px}
+.persona-fila{padding:14px 0;border-bottom:1px solid var(--linea)}
+.persona-fila:last-child{border-bottom:none}
+
+/* fila de parrilla pulsable */
+.tocable{cursor:pointer}
+.tocable:active{opacity:.7}
 
 /* ---------- escritorio ---------- */
 @media(min-width:900px){
