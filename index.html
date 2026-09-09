@@ -25,6 +25,11 @@
   --coral:#EF6C5A;
   --rosa:#EF70A5;
   --rosa-pal:#F7D6E3;
+
+  /* franjas del día: versiones apagadas, para leer sin gritar */
+  --fr-manana:#F2DFA0;
+  --fr-tarde:#A8C4DD;
+  --fr-noche:#D9AEC4;
   --amarillo:#FBDD1D;
   --lima:#92C64F;
 
@@ -62,7 +67,7 @@ header.top{position:sticky;top:var(--alto-tabs,0px);z-index:40;background:var(--
   font-weight:600;padding:2px 9px;border-radius:20px;color:#fff;margin-top:5px}
 
 /* ---------- ingreso ---------- */
-.portada{padding:40px 0 18px;text-align:center}
+.portada{padding:46px 0 20px;text-align:center}
 .portada .criatura{margin:0 auto 20px;display:block}
 .portada h2{font-size:1.5rem;font-weight:800;letter-spacing:-.035em;line-height:1.08}
 .portada .fecha{font-family:var(--mono);font-size:.72rem;color:var(--suave);margin-top:10px}
@@ -79,11 +84,12 @@ header.top{position:sticky;top:var(--alto-tabs,0px);z-index:40;background:var(--
 
 /* ---------- avatares ---------- */
 .av{position:relative;border-radius:50%;background:var(--rosa-pal);
-  display:grid;place-items:center;overflow:hidden;flex:0 0 auto}
+  display:inline-grid;place-items:center;overflow:hidden;flex:0 0 auto;
+  aspect-ratio:1;vertical-align:middle}
 .av img{width:100%;height:100%;object-fit:cover;display:block}
 .av .ini{font-family:var(--mono);font-weight:700;color:var(--cobalto)}
-.av-ring{padding:2.5px;border-radius:50%;background:var(--linea);display:inline-block;
-  flex:0 0 auto;line-height:0}
+.av-ring{display:inline-grid;place-items:center;padding:3px;border-radius:50%;
+  background:var(--linea);flex:0 0 auto;line-height:0;font-size:0;aspect-ratio:1}
 .av-ring.sala{background:var(--lima)}
 .av-ring.descanso{background:var(--amarillo)}
 .av-ring.tarde{background:var(--coral)}
@@ -98,10 +104,10 @@ header.top{position:sticky;top:var(--alto-tabs,0px);z-index:40;background:var(--
 .av-48 .ini{font-size:1rem}.av-44 .ini{font-size:.9rem}
 .av-40 .ini{font-size:.84rem}.av-36 .ini{font-size:.75rem}
 .av-32 .ini{font-size:.68rem}.av-28 .ini{font-size:.6rem}
-.av-ring{padding:3px}
+
 
 /* ---------- bloques ---------- */
-main{padding-top:26px}
+main{padding-top:34px}
 .bloque{background:var(--superficie);border:1px solid var(--linea);
   border-radius:var(--r);padding:18px;margin-bottom:16px}
 .bloque > .lbl{display:block;margin-bottom:12px}
@@ -139,13 +145,16 @@ main{padding-top:26px}
 .gantt-scroll::-webkit-scrollbar{height:6px}
 .gantt-scroll::-webkit-scrollbar-thumb{background:var(--linea-fuerte);border-radius:3px}
 .gantt{min-width:660px}
-.escala{position:relative;height:15px;margin-left:var(--col-nombre);margin-bottom:7px}
+.escala{position:relative;height:15px;margin-left:calc(var(--col-nombre) + 10px);
+  margin-bottom:7px}
 .escala span{position:absolute;transform:translateX(-50%);font-family:var(--mono);
   font-size:.58rem;color:var(--tenue)}
 :root{--col-nombre:132px}
-.fila{display:flex;align-items:center;gap:10px;margin-bottom:7px}
-.fila .quien{flex:0 0 var(--col-nombre);display:flex;align-items:center;gap:9px;
-  position:sticky;left:0;background:var(--superficie);z-index:3;padding-right:6px}
+.fila{display:flex;align-items:stretch;gap:0;margin-bottom:7px}
+.fila .quien{flex:0 0 var(--col-nombre);display:flex;align-items:center;gap:10px;
+  position:sticky;left:0;background:var(--superficie);z-index:3;
+  padding:0 12px 0 0;margin-right:10px;
+  box-shadow:8px 0 8px -8px rgba(27,26,22,.10)}
 .fila .quien b{font-size:.78rem;font-weight:600;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
 .pista{position:relative;flex:1;height:44px;background:#F4F3EE;border-radius:9px;overflow:hidden}
@@ -153,11 +162,10 @@ main{padding-top:26px}
 .barra{position:absolute;top:0;bottom:0;border-radius:9px;overflow:hidden;
   display:flex;align-items:center;padding:0 8px}
 .barra .grad{position:absolute;top:0;bottom:0;pointer-events:none}
-.barra .etq{position:relative;z-index:2;font-family:var(--mono);font-size:.62rem;
-  font-weight:700;white-space:nowrap;background:rgba(255,255,255,.88);color:var(--tinta);
-  padding:2px 7px;border-radius:20px}
+.barra .etq{position:relative;z-index:2;font-family:var(--mono);font-size:.64rem;
+  font-weight:700;white-space:nowrap;color:#3A3526;letter-spacing:-.01em}
 .descanso{position:absolute;top:0;bottom:0;z-index:1;
-  background:repeating-linear-gradient(45deg,rgba(255,255,255,.62) 0 4px,transparent 4px 8px)}
+  background:repeating-linear-gradient(45deg,rgba(27,26,22,.17) 0 4px,transparent 4px 8px)}
 .libre-txt{position:absolute;inset:0;display:flex;align-items:center;padding-left:11px;
   font-size:.7rem;color:var(--tenue)}
 .ahora-linea{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--tinta);z-index:5}
@@ -366,6 +374,33 @@ nav.tabs button.act svg{stroke-width:2.2}
 .tocable:active{opacity:.7}
 
 
+
+/* celdas de la parrilla de varios días */
+.celda-f{width:30px;height:26px;border-radius:5px;display:grid;place-items:center;
+  font-family:var(--mono);font-size:.6rem;font-weight:700;color:#3A3526}
+.celda-f.manana{background:var(--fr-manana)}
+.celda-f.tarde{background:var(--fr-tarde)}
+.celda-f.noche{background:var(--fr-noche)}
+.celda-f.vacia{background:#F2F1EC;color:var(--linea-fuerte)}
+
+/* diagrama de jornadas completas */
+.jmap{margin-top:14px}
+.jrow{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.jrow .n{flex:0 0 92px;font-size:.74rem;font-weight:600;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.jrow .p{position:relative;flex:1;height:24px;background:#F4F3EE;border-radius:6px;
+  overflow:hidden}
+.jrow .p .g{position:absolute;top:0;bottom:0;width:1px;background:var(--linea)}
+.jrow .h{flex:0 0 auto;font-family:var(--mono);font-size:.6rem;color:var(--suave);
+  white-space:nowrap}
+.jesc{position:relative;height:14px;margin:0 0 6px 102px}
+.jesc span{position:absolute;transform:translateX(-50%);font-family:var(--mono);
+  font-size:.55rem;color:var(--tenue)}
+
+/* perfil: la foto va centrada de verdad */
+.perfil-cab{text-align:center;padding:10px 0 4px}
+.perfil-cab .av,.perfil-cab .av-ring{display:block;margin:0 auto}
+
 /* ---------- diagrama de cobertura ---------- */
 .cobmap{display:grid;gap:3px;margin-top:12px}
 .cobrow{display:flex;align-items:center;gap:9px}
@@ -385,7 +420,6 @@ nav.tabs button.act svg{stroke-width:2.2}
 .equipo .uno span{display:block;font-size:.64rem;color:var(--tenue);margin-top:1px}
 
 /* ---------- perfil ---------- */
-.perfil-cab{text-align:center;padding:6px 0 2px}
 .perfil-cab h3{font-size:1.3rem;font-weight:800;letter-spacing:-.03em;margin-top:14px}
 
 /* ---------- misiones ---------- */
@@ -421,7 +455,7 @@ nav.tabs button.act svg{stroke-width:2.2}
   nav.tabs{position:sticky;top:0;bottom:auto;border-top:none;
     border-bottom:1px solid var(--linea);background:var(--fondo)}
   nav.tabs button{flex-direction:row;gap:7px;font-size:.78rem;padding:13px 14px}
-  main{padding-top:30px}
+  main{padding-top:40px}
   .bloque{padding:22px}
   .gantt{min-width:0}
   .gantt-scroll{margin:0;padding:0}

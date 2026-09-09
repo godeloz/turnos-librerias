@@ -30,6 +30,7 @@ const S = {
   feed: [],
   reacciones: [],
   vista: 'inicio',
+  scrollFijo: null,
   error: null
 };
 
@@ -105,7 +106,8 @@ function avatar(p, tam = 36, anillo = null){
 }
 /* Las tres franjas del día. El color deja de ser una etiqueta de turno
    y pasa a decir por qué horas del día pasa cada persona. */
-const FRANJA = { manana:'#FBDD1D', tarde:'#1E6DB4', noche:'#EF70A5' };
+const FRANJA = { manana:'#F2DFA0', tarde:'#A8C4DD', noche:'#D9AEC4' };
+const franjaDe = m => m < 12*60 ? 'manana' : m < 18*60 ? 'tarde' : 'noche';
 
 function gradienteDia(ini, fin){
   const span = fin - ini, d = 6;
@@ -204,8 +206,11 @@ function calcularRango(){
     const lun = masDias(S.fechaVista, -((d.getUTCDay()+6)%7));
     S.rango = [lun, masDias(lun, 6)];
   }
+  /* La app abre siempre en el día de hoy. Solo si hoy cae fuera del evento
+     se muestra el día del rango más cercano, y se dice en pantalla. */
   if(S.fechaVista < S.rango[0] || S.fechaVista > S.rango[1]){
-    S.fechaVista = (S.fecha >= S.rango[0] && S.fecha <= S.rango[1]) ? S.fecha : S.rango[0];
+    S.fechaVista = S.fecha < S.rango[0] ? S.rango[0]
+                 : S.fecha > S.rango[1] ? S.rango[1] : S.fecha;
   }
 }
 
@@ -588,8 +593,11 @@ function bloqueParrillaDia(fecha){
   </div>
   <div class="btn-fila">
     <button class="btn sec" data-cobertura="${fecha}">Cobertura del día</button>
+    <button class="btn sec" data-completo="${fecha}">Ver completo</button>
   </div>
-  <p class="nota" style="margin-top:10px">Toca a alguien para ver todas sus jornadas.</p></div>`;
+  <p class="nota" style="margin-top:10px">Toca a alguien para ver todas sus jornadas.
+    Mínimo exigido en ${esc(l?.nombre || 'esta librería')}: ${mn}
+    ${mn===1?'persona':'personas'} en sala.</p></div>`;
   return h;
 }
 
@@ -668,6 +676,66 @@ function modalCobertura(fecha){
     <p class="nota" style="margin-top:10px">La línea vertical marca el mínimo exigido.</p>
     <div class="btn-fila"><button class="btn" style="flex:1" id="cbCerrar">Cerrar</button></div>`);
   v.querySelector('#cbCerrar').onclick = () => v.remove();
+}
+
+
+/* Todas las jornadas del día en un solo diagrama, sin fotos. */
+function modalJornadas(fecha){
+  const l = libDe(S.libreriaVista);
+  const {ini, fin} = horarioDe(l, fecha);
+  const pct = m => ((m - ini)/(fin - ini)*100);
+  const grad = gradienteDia(ini, fin);
+  const gente = equipoDe(S.libreriaVista);
+  const marcas = []; for(let m = Math.ceil(ini/120)*120; m < fin; m += 120) marcas.push(m);
+  const dn = diaEvento(l, fecha);
+
+  const filas = gente.map(p => ({p, t:turnoDe(p.id, fecha)}))
+    .sort((a,b) => {
+      if(!a.t?.inicio) return 1;
+      if(!b.t?.inicio) return -1;
+      return min(a.t.inicio) - min(b.t.inicio);
+    });
+  const total = filas.reduce((s,x) => s + horasTurno(x.t), 0);
+
+  const v = modal(`
+    <h3>Jornadas · ${esc(fechaLarga(fecha))}</h3>
+    <p class="nota" style="margin-top:6px">${esc(l?.nombre || '')}${dn ? ' · día '+dn+' de la fiesta' : ''} ·
+      ${fmt(ini)} a ${fmt(fin)} · ${horas(total)} en total.
+      Ordenado por hora de entrada.</p>
+    <div class="jmap">
+      <div class="jesc">${marcas.map(m =>
+        `<span style="left:${pct(m)}%">${fmtCorto(m)}</span>`).join('')}</div>` +
+    filas.map(({p,t}) => {
+      if(!t || !t.inicio || t.tipo === 'libre'){
+        return `<div class="jrow"><span class="n">${esc(p.nombre_corto)}</span>
+          <div class="p"></div><span class="h">libre</span></div>`;
+      }
+      const a = Math.max(ini, min(t.inicio)), b = Math.min(fin, min(t.fin));
+      const L = pct(a), W = Math.max(0.1, pct(b) - pct(a));
+      let dentro = `<i class="grad" style="left:${(-L/W*100).toFixed(2)}%;
+        width:${(10000/W).toFixed(2)}%;background:${grad}"></i>`;
+      if(t.descanso_inicio && t.descanso_min){
+        const d0 = min(t.descanso_inicio), d1 = d0 + t.descanso_min;
+        dentro += `<div class="descanso" style="left:${((d0-a)/(b-a)*100).toFixed(2)}%;
+          width:${((d1-d0)/(b-a)*100).toFixed(2)}%"></div>`;
+      }
+      return `<div class="jrow"><span class="n">${esc(p.nombre_corto)}</span>
+        <div class="p">${marcas.map(m => `<div class="g" style="left:${pct(m)}%"></div>`).join('')}
+          <div class="barra" style="left:${L}%;width:${W}%;border-radius:6px">${dentro}</div></div>
+        <span class="h">${fmtCorto(a)}–${fmtCorto(b)} · ${horas(horasTurno(t))}</span></div>`;
+    }).join('') + `</div>
+    <div class="leyenda" style="margin-left:0;margin-top:14px">
+      <span><i style="background:${FRANJA.manana}"></i>mañana</span>
+      <span><i style="background:${FRANJA.tarde}"></i>tarde</span>
+      <span><i style="background:${FRANJA.noche}"></i>noche</span>
+      <span><i style="background:repeating-linear-gradient(45deg,#bbb 0 3px,transparent 3px 6px)"></i>descanso</span>
+    </div>
+    <div class="btn-fila">
+      <button class="btn sec" style="flex:1" data-cobertura="${fecha}">Ver cobertura</button>
+      <button class="btn" id="jCerrar">Cerrar</button></div>`);
+  v.querySelector('#jCerrar').onclick = () => v.remove();
+  v.querySelectorAll('[data-cobertura]').forEach(b => b.onclick = () => {
+    v.remove(); modalCobertura(fecha); });
 }
 
 /* =====================================================================
@@ -760,7 +828,7 @@ function vistaParrilla(){
   const l = libDe(S.libreriaVista);
   const dias = diasDe(S.rango[0], S.rango[1]);
   const gente = equipoDe(S.libreriaVista);
-  const letra = {manana:'M', tarde:'T', completa:'C', compensacion:'✳', personalizado:'•', libre:'·'};
+  const letra = {manana:'M', tarde:'T', noche:'N'};
   const dnHoy = diaEvento(l, S.fechaVista);
 
   let h = selectorLibrerias();
@@ -786,27 +854,26 @@ function vistaParrilla(){
   for(const p of gente){
     h += `<tr class="tocable" data-ver-persona="${p.id}">
       <td style="position:sticky;left:0;background:var(--superficie);z-index:2;font-size:.68rem;
-        font-weight:500;padding-right:8px;white-space:nowrap">${esc(p.nombre_corto)}</td>`;
+        font-weight:500;padding-right:10px;white-space:nowrap">${esc(p.nombre_corto)}</td>`;
     for(const d of dias){
       const t = turnoDe(p.id, d);
       if(!t || t.tipo === 'libre' || !t.inicio){
-        h += `<td><div style="width:28px;height:24px;border-radius:5px;background:#F2F1EC;
-          display:grid;place-items:center;color:var(--linea-fuerte)">·</div></td>`;
+        h += `<td><div class="celda-f vacia">·</div></td>`;
       } else {
-        h += `<td><div class="barra ${esc(t.tipo)}" style="position:static;width:28px;height:24px;
-          display:grid;place-items:center;padding:0;font-size:.6rem"
+        /* el color lo da la franja en la que arranca la jornada */
+        const f = franjaDe(min(t.inicio));
+        h += `<td><div class="celda-f ${f}"
           title="${esc(p.nombre_corto)} ${fmt(min(t.inicio))}–${fmt(min(t.fin))}">
-          ${letra[t.tipo]||'•'}</div></td>`;
+          ${letra[f]}</div></td>`;
       }
     }
     h += `</tr>`;
   }
   h += `</tbody></table></div>
     <div class="leyenda" style="margin-left:0">
-      <span><i style="background:var(--amarillo)"></i>M mañana</span>
-      <span><i style="background:var(--cobalto)"></i>T tarde</span>
-      <span><i style="background:var(--coral)"></i>C completa</span>
-      <span><i style="background:var(--lima)"></i>✳ compensación</span></div></div>`;
+      <span><i style="background:var(--fr-manana)"></i>M entra en la mañana</span>
+      <span><i style="background:var(--fr-tarde)"></i>T entra en la tarde</span>
+      <span><i style="background:var(--fr-noche)"></i>N entra en la noche</span></div></div>`;
 
   h += navegadorDias();
   h += bloqueParrillaDia(S.fechaVista);
@@ -1216,7 +1283,10 @@ async function vistaAdmin(){
       act.n = Math.min(act.n, c.n);
     } else act = null;
   }
-  h += `<div class="bloque"><span class="lbl">cobertura · ${esc(fechaLarga(S.fechaVista))}</span>`
+  h += `<div class="bloque"><span class="lbl">cobertura · ${esc(fechaLarga(S.fechaVista))}</span>
+    <p class="nota" style="margin-bottom:12px">Mínimo de ${esc(l?.nombre || '')}:
+      ${l?.minimo_semana ?? 2} entre semana, ${l?.minimo_finde ?? 3} fines de semana.
+      Se cambia en «Configurar esta librería».</p>`
     + (flojas.length ? flojas.map(f => `<div class="alerta"><b>${fmt(f.ini)} a ${fmt(f.fin)}</b>
         <p>Solo ${f.n} en sala, por debajo del mínimo de ${mn}.</p></div>`).join('')
       : `<div class="bien">Todas las franjas cumplen el mínimo de ${mn}.</div>`)
@@ -1659,10 +1729,12 @@ function formLibreria(l){
     <input type="time" id="cCi" value="${l?.cierre?.slice(0,5)||'20:00'}">
     <label class="campo" for="cDes">Descanso en minutos</label>
     <input type="number" id="cDes" value="${l?.descanso_min ?? 60}" step="15">
-    <label class="campo" for="cMs">Mínimo en sala entre semana</label>
-    <input type="number" id="cMs" value="${l?.minimo_semana ?? 2}">
-    <label class="campo" for="cMf">Mínimo en sala fines de semana</label>
-    <input type="number" id="cMf" value="${l?.minimo_finde ?? 3}">
+    <label class="campo" for="cMs">Mínimo de personas en sala · entre semana</label>
+    <input type="number" id="cMs" min="1" max="30" value="${l?.minimo_semana ?? 2}">
+    <label class="campo" for="cMf">Mínimo de personas en sala · sábados y domingos</label>
+    <input type="number" id="cMf" min="1" max="30" value="${l?.minimo_finde ?? 3}">
+    <p class="nota" style="margin-top:8px">Es el umbral que dispara las alertas de cobertura
+    de esta librería. Cada una tiene el suyo.</p>
     <label class="campo" for="cMeta">Meta diaria de ejemplares (opcional)</label>
     <input type="number" id="cMeta" value="${l?.meta_ejemplares ?? ''}">
     <label class="campo" for="cTar">Valor hora base</label>
@@ -1742,7 +1814,8 @@ async function render(){
                 : S.vista === 'perfil'   ? await vistaPerfil()
                 : await vistaAdmin();
   enlazar();
-  window.scrollTo({top:0});
+  if(S.scrollFijo == null) window.scrollTo({top:0});
+  else { const y = S.scrollFijo; S.scrollFijo = null; window.scrollTo({top:y}); }
 }
 
 function enlazar(){
@@ -1757,6 +1830,7 @@ function enlazar(){
     S.libreriaVista = b.dataset.irLib; calcularRango(); await cargarLibreria(); render();
   });
   document.querySelectorAll('[data-dia]').forEach(b => b.onclick = async () => {
+    S.scrollFijo = window.scrollY;
     S.fechaVista = b.dataset.dia; await cargarLibreria(); render();
   });
   document.querySelectorAll('[data-ver-persona]').forEach(b => b.onclick = e => {
@@ -1812,6 +1886,7 @@ function enlazar(){
   const sf = el('saltarFecha');
   if(sf) sf.onchange = async () => {
     if(!sf.value) return;
+    S.scrollFijo = window.scrollY;
     S.fechaVista = sf.value;
     if(S.fechaVista < S.rango[0] || S.fechaVista > S.rango[1]){
       const d = new Date(S.fechaVista+'T12:00:00Z');
@@ -1821,11 +1896,14 @@ function enlazar(){
     await cargarLibreria(); render();
   };
   on('volverHoy', async () => {
+    S.scrollFijo = window.scrollY;
     S.fechaVista = S.fecha; calcularRango(); await cargarLibreria(); render(); });
 
   /* diagrama de cobertura */
   document.querySelectorAll('[data-cobertura]').forEach(b =>
     b.onclick = () => modalCobertura(b.dataset.cobertura));
+  document.querySelectorAll('[data-completo]').forEach(b =>
+    b.onclick = () => modalJornadas(b.dataset.completo));
 
   /* misiones logradas */
   document.querySelectorAll('[data-mision]').forEach(b => b.onclick = async () => {
