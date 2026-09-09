@@ -55,7 +55,7 @@ button{border:none;background:none;cursor:pointer}
 /* ---------- cabecera ---------- */
 header.top{position:sticky;top:var(--alto-tabs,0px);z-index:40;background:var(--fondo);
   border-bottom:1px solid var(--linea)}
-.top-in{padding:13px 0 14px;display:flex;align-items:flex-start;
+.top-in{padding:12px 0 12px;display:flex;align-items:flex-start;
   justify-content:space-between;gap:16px}
 .top h1{font-size:.88rem;font-weight:700;letter-spacing:-.015em;line-height:1.3}
 .top .meta{font-family:var(--mono);font-size:.66rem;color:var(--suave);margin-top:3px}
@@ -107,7 +107,7 @@ header.top{position:sticky;top:var(--alto-tabs,0px);z-index:40;background:var(--
 
 
 /* ---------- bloques ---------- */
-main{padding-top:34px}
+main.wrap{padding-top:34px}
 .bloque{background:var(--superficie);border:1px solid var(--linea);
   border-radius:var(--r);padding:18px;margin-bottom:16px}
 .bloque > .lbl{display:block;margin-bottom:12px}
@@ -384,22 +384,36 @@ nav.tabs button.act svg{stroke-width:2.2}
 .celda-f.vacia{background:#F2F1EC;color:var(--linea-fuerte)}
 
 /* diagrama de jornadas completas */
-.jmap{margin-top:14px}
-.jrow{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-.jrow .n{flex:0 0 92px;font-size:.74rem;font-weight:600;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis}
-.jrow .p{position:relative;flex:1;height:24px;background:#F4F3EE;border-radius:6px;
-  overflow:hidden}
-.jrow .p .g{position:absolute;top:0;bottom:0;width:1px;background:var(--linea)}
-.jrow .h{flex:0 0 auto;font-family:var(--mono);font-size:.6rem;color:var(--suave);
+.jmap{margin-top:16px}
+.jesc{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.6rem;
+  color:var(--tenue);margin-bottom:8px;padding:0 2px}
+.jrow{margin-bottom:16px}
+.jrow .n{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+  margin-bottom:6px}
+.jrow .n b{font-size:.84rem;font-weight:600}
+.jrow .n em{font-style:normal;font-family:var(--mono);font-size:.62rem;color:var(--suave);
   white-space:nowrap}
-.jesc{position:relative;height:14px;margin:0 0 6px 102px}
-.jesc span{position:absolute;transform:translateX(-50%);font-family:var(--mono);
-  font-size:.55rem;color:var(--tenue)}
+.jrow .p{position:relative;height:28px;background:#F4F3EE;border-radius:8px}
+.jrow .p .g{position:absolute;top:0;bottom:0;width:1px;background:var(--linea)}
+.jb{position:absolute;top:0;bottom:0;border-radius:8px;overflow:hidden}
+.jb .grad{position:absolute;top:0;bottom:0}
+.jt{position:absolute;top:0;height:28px;display:flex;align-items:center;z-index:3;
+  font-family:var(--mono);font-size:.62rem;font-weight:700;color:#3A3526;white-space:nowrap}
+.jt.fuera{color:var(--suave)}
+.jrow.libre .p{opacity:.55}
+.jlibre{position:absolute;inset:0;display:flex;align-items:center;padding-left:11px;
+  font-size:.7rem;color:var(--tenue)}
 
 /* perfil: la foto va centrada de verdad */
 .perfil-cab{text-align:center;padding:10px 0 4px}
 .perfil-cab .av,.perfil-cab .av-ring{display:block;margin:0 auto}
+
+/* rango de la parrilla */
+.rango-fechas{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:14px}
+.rango-fechas > div{flex:1;min-width:130px}
+.rango-fechas label{display:block;font-family:var(--mono);font-size:.58rem;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--tenue);margin-bottom:5px}
+.rango-fechas input{padding:9px 11px;font-size:.8rem}
 
 /* ---------- diagrama de cobertura ---------- */
 .cobmap{display:grid;gap:3px;margin-top:12px}
@@ -455,7 +469,7 @@ nav.tabs button.act svg{stroke-width:2.2}
   nav.tabs{position:sticky;top:0;bottom:auto;border-top:none;
     border-bottom:1px solid var(--linea);background:var(--fondo)}
   nav.tabs button{flex-direction:row;gap:7px;font-size:.78rem;padding:13px 14px}
-  main{padding-top:40px}
+  main.wrap{padding-top:40px}
   .bloque{padding:22px}
   .gantt{min-width:0}
   .gantt-scroll{margin:0;padding:0}
