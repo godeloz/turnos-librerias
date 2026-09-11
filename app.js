@@ -681,7 +681,7 @@ function fichaPersona(id){
       <p class="nota">${esc(l?.nombre||'')}${p.es_admin?' · coordinación':''}</p></div>
     <div class="bloque" style="margin-top:14px;background:var(--fondo)">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <span class="lbl">horas pactadas en el período</span>
+        <span class="lbl">horas pagadas en el período</span>
         <span style="font-size:1.4rem;font-weight:800;letter-spacing:-.04em">${horas(total)}</span>
       </div></div>
     <ul class="lista" style="max-height:46vh;overflow-y:auto">` +
@@ -690,7 +690,8 @@ function fichaPersona(id){
       return `<li><div class="info">
         <b>${esc(fechaLarga(d))}${dn?` · día ${dn}`:''}</b>
         <span>${t && t.inicio ? fmt(min(t.inicio))+' a '+fmt(min(t.fin)) +
-          (t.descanso_min ? ' · descanso '+fmtCorto(min(t.descanso_inicio)) : ' · sin descanso')
+          ' · ' + horas((min(t.fin)-min(t.inicio))/60) + ' de turno' +
+          (t.descanso_min ? ', descanso a las '+fmtCorto(min(t.descanso_inicio)) : ', sin descanso')
           : 'Libre'}</span></div>
         <div class="dato">${t && t.inicio ? horas(horasTurno(t)) : '—'}</div></li>`;
     }).join('') + `</ul>
@@ -1080,7 +1081,7 @@ function vistaParrilla(){
   h += navegadorDias();
   h += bloqueParrillaDia(S.fechaVista);
 
-  h += `<div class="bloque"><span class="lbl">horas pactadas · ${esc(fechaCorta(t0))} a ${esc(fechaCorta(t1))}</span><ul class="lista">` +
+  h += `<div class="bloque"><span class="lbl">horas pagadas · ${esc(fechaCorta(t0))} a ${esc(fechaCorta(t1))}</span><ul class="lista">` +
     gente.map(p => {
       const hs = dias.reduce((s,d) => s + horasTurno(turnoDe(p.id,d)), 0);
       const n  = dias.filter(d => { const t = turnoDe(p.id,d); return t && t.inicio; }).length;
@@ -1261,11 +1262,19 @@ async function alternarReaccion(pubId, emoji){
    ===================================================================== */
 const TOPE_INI = 7*60, TOPE_FIN = 22*60, PASO = 15;
 
+/* Dos números, porque son dos cosas distintas: cuánto dura el turno y
+   cuánto se paga. El descanso no se paga. */
+const etiquetaTurno = (ini, fin, desc) => {
+  const permanencia = (fin - ini)/60, pagadas = (fin - ini - desc)/60;
+  return horas(permanencia) + ' de turno · ' + horas(pagadas) + ' pagadas'
+       + (desc ? ' · descanso ' + (desc >= 60 ? horas(desc/60) : desc + ' min') : ' · sin descanso');
+};
+
 function deslizador(id, ini, fin, descanso){
   const pct = m => ((m - TOPE_INI)/(TOPE_FIN - TOPE_INI)*100);
   return `<div class="rango-cab">
-      <span class="franja" id="fr-${id}">${fmt(ini)} – ${fmt(fin)}</span>
-      <span class="cuantas" id="hr-${id}">${horas((fin-ini-descanso)/60)} de trabajo</span></div>
+      <span class="franja" id="fr-${id}">${fmt(ini)} – ${fmt(fin)}</span></div>
+    <div class="cuantas" id="hr-${id}" style="margin:2px 0 2px">${etiquetaTurno(ini,fin,descanso)}</div>
     <div class="rango">
       <div class="via"></div>
       <div class="activo" id="ac-${id}" style="left:${pct(ini)}%;width:${pct(fin)-pct(ini)}%"></div>
@@ -1290,7 +1299,7 @@ function enlazarDeslizador(cont, id, descanso, alSoltar){
     const ac = cont.querySelector('#ac-'+id);
     ac.style.left = pct(x)+'%'; ac.style.width = (pct(y)-pct(x))+'%';
     cont.querySelector('#fr-'+id).textContent = fmt(x)+' – '+fmt(y);
-    cont.querySelector('#hr-'+id).textContent = horas((y-x-descanso)/60) + ' de trabajo';
+    cont.querySelector('#hr-'+id).textContent = etiquetaTurno(x, y, descanso);
     return [x,y];
   };
   [a,b].forEach(s => {
@@ -1859,7 +1868,9 @@ async function panelHorarios(){
 
   const v = modal(`<h3>Administrar horarios</h3>
     <p class="nota" style="margin-top:6px">Elige cualquier día del calendario y mueve los dos
-    topes de cada jornada. Los cambios no se guardan hasta que pulses Guardar.</p>
+    topes de cada jornada. El primer número es lo que dura el turno de punta a punta;
+    el segundo, lo que se paga, ya sin el descanso.
+    Los cambios no se guardan hasta que pulses Guardar.</p>
     <label class="campo" for="hDia">Día</label>
     <input type="date" id="hDia" value="${S.fechaVista}">
     <div id="hLista" style="margin-top:10px;max-height:44vh;overflow-y:auto"></div>
@@ -1921,7 +1932,14 @@ async function panelHorarios(){
           ${tocado?'<span class="pendiente"> ·  sin guardar</span>':''}</b>
           <button class="btn sec mini" data-repetir="${p.id}">Repetir</button>
           <button class="btn sec mini" data-librar="${p.id}">Dejar libre</button></div>
-        ${deslizador(p.id, a.ini, a.fin, a.desc)}</div>`;
+        ${deslizador(p.id, a.ini, a.fin, a.desc)}
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <span class="lbl">descanso</span>
+          <select data-desc="${p.id}" style="width:auto;padding:6px 9px;font-size:.76rem">
+            ${[0,30,45,60,90].map(n => `<option value="${n}"${n===a.desc?' selected':''}>
+              ${n === 0 ? 'sin descanso' : n + ' min'}</option>`).join('')}
+          </select>
+        </div></div>`;
     }).join('');
 
     gente.forEach(p => {
@@ -1942,6 +1960,11 @@ async function panelHorarios(){
     });
     v.querySelectorAll('[data-librar]').forEach(btn => btn.onclick = () => {
       borrador[btn.dataset.librar] = { libre:true };
+      dibujar(); refrescarBotones();
+    });
+    v.querySelectorAll('[data-desc]').forEach(sel => sel.onchange = () => {
+      const p = gente.find(x => x.id === sel.dataset.desc);
+      borrador[p.id] = { ...actual(p), desc: +sel.value };
       dibujar(); refrescarBotones();
     });
     v.querySelectorAll('[data-repetir]').forEach(btn => btn.onclick = () => {

@@ -18,5 +18,5 @@ export const CONFIG = {
 
   // Sube este número en cada publicación. Cambia la ruta de los archivos y
   // obliga a los navegadores a descargar la versión nueva en vez de la suya.
-  VERSION: '7'
+  VERSION: '8'
 };
