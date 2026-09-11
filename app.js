@@ -23,7 +23,8 @@ const S = {
   fechaVista: null,      // el día que se está mirando
   rango: [null, null],
   turnos: [],            // del rango completo, de la librería vista
-  jornadas: [],          // del día visto
+  jornadas: [],          // del día visto (propias + todas si es coordinación)
+  presencia: [],         // marcas de todo el equipo, sin datos de nómina
   miJornada: null,
   dia: null,
   avisos: [],
@@ -31,6 +32,7 @@ const S = {
   reacciones: [],
   vista: 'inicio',
   scrollFijo: null,
+  verRetirados: false,
   parrilla: null,      // rango elegido a mano para la tabla de varios días
   error: null
 };
@@ -207,18 +209,17 @@ function calcularRango(){
     const lun = masDias(S.fechaVista, -((d.getUTCDay()+6)%7));
     S.rango = [lun, masDias(lun, 6)];
   }
-  /* La app abre siempre en el día de hoy. Solo si hoy cae fuera del evento
-     se muestra el día del rango más cercano, y se dice en pantalla. */
-  if(S.fechaVista < S.rango[0] || S.fechaVista > S.rango[1]){
-    S.fechaVista = S.fecha < S.rango[0] ? S.rango[0]
-                 : S.fecha > S.rango[1] ? S.rango[1] : S.fecha;
-  }
+  /* El inicio siempre muestra el día de hoy, aunque caiga fuera del evento
+     (la víspera, por ejemplo). En vez de mover la vista, se estira el rango
+     de datos para que hoy quepa. */
+  if(S.fechaVista < S.rango[0]) S.rango = [S.fechaVista, S.rango[1]];
+  else if(S.fechaVista > S.rango[1]) S.rango = [S.rango[0], S.fechaVista];
 }
 
 async function cargarLibreria(){
   const ids = S.personas.filter(p => p.libreria_id === S.libreriaVista).map(p => p.id);
   const vacio = Promise.resolve({data:[]});
-  const [turnos, jornadas, dia] = await Promise.all([
+  const [turnos, jornadas, presencia, dia] = await Promise.all([
     ids.length ? (() => {
         const [a,b] = rangoTabla();
         const desde = [a, S.rango[0], S.fechaVista].sort()[0];
@@ -228,12 +229,15 @@ async function cargarLibreria(){
       })() : vacio,
     ids.length ? sb.from('jornadas').select('*').in('persona_id', ids)
                    .eq('fecha', S.fechaVista) : vacio,
+    ids.length ? sb.from('presencia').select('*').in('persona_id', ids)
+                   .eq('fecha', S.fechaVista) : vacio,
     sb.from('dias_visible').select('*').eq('libreria_id', S.libreriaVista)
       .eq('fecha', S.fechaVista).maybeSingle()
   ]);
-  S.turnos   = turnos.data || [];
-  S.jornadas = jornadas.data || [];
-  S.dia      = dia.data || null;
+  S.turnos    = turnos.data || [];
+  S.jornadas  = jornadas.data || [];
+  S.presencia = presencia.data || [];
+  S.dia       = dia.data || null;
 
   if(S.yo){
     const r = await sb.from('jornadas').select('*')
@@ -269,11 +273,28 @@ function rangoTabla(){
 const turnoDe = (personaId, fecha) =>
   S.turnos.find(t => t.persona_id === personaId && t.fecha === fecha) || null;
 const jornadaDe = personaId => S.jornadas.find(j => j.persona_id === personaId) || null;
+/* Para saber quién está en sala se usa la presencia, que ve todo el equipo.
+   `jornadas` queda para las horas y las extras, que solo ve la coordinación. */
+const marcaDe = personaId => S.presencia.find(j => j.persona_id === personaId) || null;
+
+/* Si alguien marcó su descanso, esa es la hora buena: la franja de la
+   parrilla se mueve al momento real y ya no vuelve atrás. */
+function descansoDe(personaId, fecha, t){
+  const m = marcaDe(personaId);
+  if(fecha === S.fechaVista && m?.descanso_en){
+    const p = new Intl.DateTimeFormat('en-GB',{timeZone:CONFIG.TZ,hour:'2-digit',
+      minute:'2-digit',hour12:false}).format(new Date(m.descanso_en)).split(':');
+    const real = (+p[0])*60 + (+p[1]);
+    return { ini: real, min: t?.descanso_min || 60, real: true };
+  }
+  if(!t || !t.descanso_inicio || !t.descanso_min) return null;
+  return { ini: min(t.descanso_inicio), min: t.descanso_min, real: false };
+}
 
 /* La jornada manda sobre la parrilla: quien ya saludó está en sala
    aunque ese día no tuviera turno asignado. */
 function estadoDe(personaId){
-  const j = jornadaDe(personaId), t = turnoDe(personaId, S.fechaVista);
+  const j = marcaDe(personaId), t = turnoDe(personaId, S.fechaVista);
   if(j?.cierre_en)   return {clave:'salio',    txt:'Cerró a las ' + horaDe(j.cierre_en)};
   if(j?.descanso_en) return {clave:'descanso', txt:'En descanso desde ' + horaDe(j.descanso_en)};
   if(j?.saludo_en)   return {clave:'sala',     txt:'Llegó a las ' + horaDe(j.saludo_en)};
@@ -294,8 +315,8 @@ function cobertura(fecha){
       if(t.fecha !== fecha || !t.inicio || t.tipo === 'libre') continue;
       const a = min(t.inicio), b = min(t.fin);
       if(m < a || m >= b) continue;
-      if(t.descanso_inicio){ const d = min(t.descanso_inicio);
-        if(m >= d && m < d + t.descanso_min) continue; }
+      const d = descansoDe(t.persona_id, fecha, t);
+      if(d && m >= d.ini && m < d.ini + d.min) continue;
       n++; quien.push(t.persona_id);
     }
     out.push({m, n, quien});
@@ -391,6 +412,17 @@ function pedirClave(correo, nombre){
   v.querySelector('#mEntrar').onclick = entrar;
   inp.onkeydown = e => { if(e.key === 'Enter') entrar(); };
   v.querySelector('#mCancelar').onclick = () => v.remove();
+}
+
+/* Los errores de Postgres llegan crudos. Estos son los que ve la coordinación. */
+function traducirBase(m){
+  if(/personas_correo_key/i.test(m))
+    return 'Ese correo ya está en uso por otro registro, incluso si está retirado. '
+         + 'Actívalo en «Ver retirados» y libéralo, o elimina el duplicado.';
+  if(/duplicate key/i.test(m)) return 'Ya existe un registro con ese dato.';
+  if(/violates row-level security/i.test(m))
+    return 'Tu cuenta no tiene permiso para esta acción.';
+  return m;
 }
 
 function traducirError(m){
@@ -585,9 +617,12 @@ function bloqueParrillaDia(fecha){
       const L = pct(a), W = Math.max(0.1, pct(b) - pct(a));
       let dentro = `<i class="grad" style="left:${(-L/W*100).toFixed(2)}%;
         width:${(10000/W).toFixed(2)}%;background:${grad}"></i>`;
-      if(t.descanso_inicio && t.descanso_min){
-        const d0 = min(t.descanso_inicio), d1 = d0 + t.descanso_min;
-        dentro += `<div class="descanso" style="left:${((d0-a)/(b-a)*100).toFixed(2)}%;
+      const des = descansoDe(p.id, fecha, t);
+      if(des){
+        const d0 = Math.max(a, des.ini), d1 = Math.min(b, des.ini + des.min);
+        if(d1 > d0) dentro += `<div class="descanso${des.real?' real':''}"
+          title="${des.real ? 'Descanso marcado a las ' + fmt(des.ini) : 'Descanso previsto'}"
+          style="left:${((d0-a)/(b-a)*100).toFixed(2)}%;
           width:${((d1-d0)/(b-a)*100).toFixed(2)}%"></div>`;
       }
       h += `<div class="barra" style="left:${L}%;width:${W}%">${dentro}
@@ -739,9 +774,11 @@ function modalJornadas(fecha){
 
       let dentro = `<i class="grad" style="left:${(-L/W*100).toFixed(2)}%;
         width:${(10000/W).toFixed(2)}%;background:${grad}"></i>`;
-      if(t.descanso_inicio && t.descanso_min){
-        const d0 = min(t.descanso_inicio), d1 = d0 + t.descanso_min;
-        dentro += `<div class="descanso" style="left:${((d0-a)/(b-a)*100).toFixed(2)}%;
+      const des = descansoDe(p.id, fecha, t);
+      if(des){
+        const d0 = Math.max(a, des.ini), d1 = Math.min(b, des.ini + des.min);
+        if(d1 > d0) dentro += `<div class="descanso${des.real?' real':''}"
+          style="left:${((d0-a)/(b-a)*100).toFixed(2)}%;
           width:${((d1-d0)/(b-a)*100).toFixed(2)}%"></div>`;
       }
 
@@ -767,10 +804,117 @@ function modalJornadas(fecha){
       <span><i style="background:repeating-linear-gradient(45deg,#bbb 0 3px,transparent 3px 6px)"></i>descanso</span>
     </div>
     <div class="btn-fila">
-      <button class="btn sec" style="flex:1" id="jCob">Ver cobertura</button>
-      <button class="btn" id="jCerrar">Cerrar</button></div>`);
+      <button class="btn" style="flex:1" id="jPng">Descargar imagen</button>
+      <button class="btn sec" id="jCob">Cobertura</button>
+      <button class="btn sec" id="jCerrar">Cerrar</button></div>
+    <p class="nota" style="margin-top:8px;text-align:center">La imagen sale lista
+      para compartir en los grupos del equipo.</p>`);
   v.querySelector('#jCerrar').onclick = () => v.remove();
   v.querySelector('#jCob').onclick = () => { v.remove(); modalCobertura(fecha); };
+  v.querySelector('#jPng').onclick = () => descargarJornadas(fecha);
+}
+
+
+/* Exporta el diagrama de jornadas como PNG, dibujando un SVG y
+   rasterizándolo en un canvas. Sin dependencias externas. */
+function descargarJornadas(fecha){
+  const l = libDe(S.libreriaVista);
+  const {ini, fin} = horarioDe(l, fecha);
+  const dn = diaEvento(l, fecha);
+  const gente = equipoDe(S.libreriaVista);
+  const filas = gente.map(p => ({p, t:turnoDe(p.id, fecha)}))
+    .filter(x => x.t && x.t.inicio && x.t.tipo !== 'libre')
+    .sort((a,b) => min(a.t.inicio) - min(b.t.inicio));
+  if(!filas.length) return brindis('No hay turnos ese día');
+
+  const W = 1080, MI = 48, COL = 190, ALTO = 46, GAP = 10;
+  const X0 = MI + COL, X1 = W - MI - 96;
+  const ANCHO = X1 - X0;
+  const CAB = 132, PIE = 64;
+  const H = CAB + filas.length*(ALTO+GAP) + PIE;
+  const x = m => X0 + (m - ini)/(fin - ini)*ANCHO;
+
+  const marcas = []; for(let m = Math.ceil(ini/60)*60; m < fin; m += 60) marcas.push(m);
+  const esc2 = t => String(t).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const stop = (c,o) => `<stop offset="${Math.max(0,Math.min(100,o)).toFixed(2)}%" stop-color="${c}"/>`;
+  const a12 = (12*60 - ini)/(fin - ini)*100, a18 = (18*60 - ini)/(fin - ini)*100;
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    <defs><linearGradient id="dia" x1="0" y1="0" x2="1" y2="0">
+      ${stop(FRANJA.manana,0)}${stop(FRANJA.manana,a12-6)}${stop(FRANJA.tarde,a12+6)}
+      ${stop(FRANJA.tarde,a18-6)}${stop(FRANJA.noche,a18+6)}${stop(FRANJA.noche,100)}
+    </linearGradient>
+    <pattern id="des" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <rect width="4" height="8" fill="rgba(27,26,22,.22)"/></pattern></defs>
+    <rect width="${W}" height="${H}" fill="#FBFBF9"/>
+    <text x="${MI}" y="52" font-family="Helvetica,Arial,sans-serif" font-size="27"
+      font-weight="700" fill="#16181D">Turnos · ${esc2(fechaLarga(fecha))}</text>
+    <text x="${MI}" y="80" font-family="Helvetica,Arial,sans-serif" font-size="15"
+      fill="#6E6B63">${esc2(l?.nombre || '')}${dn ? ' · día '+dn+' de la fiesta' : ''} · ${esc2(fmt(ini))} a ${esc2(fmt(fin))}</text>`;
+
+  for(const m of marcas){
+    svg += `<line x1="${x(m).toFixed(1)}" y1="${CAB-18}" x2="${x(m).toFixed(1)}" y2="${H-PIE+6}"
+      stroke="#E8E6DF" stroke-width="1"/>
+      <text x="${x(m).toFixed(1)}" y="${CAB-24}" text-anchor="middle"
+        font-family="Helvetica,Arial,sans-serif" font-size="12" fill="#9C988E">${esc2(fmtCorto(m))}</text>`;
+  }
+
+  filas.forEach(({p,t}, i) => {
+    const y = CAB + i*(ALTO+GAP);
+    const a = Math.max(ini, min(t.inicio)), b = Math.min(fin, min(t.fin));
+    svg += `<text x="${MI}" y="${y+ALTO/2+6}" font-family="Helvetica,Arial,sans-serif"
+        font-size="17" font-weight="600" fill="#16181D">${esc2(p.nombre_corto)}</text>
+      <rect x="${X0}" y="${y}" width="${ANCHO}" height="${ALTO}" rx="10" fill="#F1EFE9"/>
+      <g><clipPath id="c${i}"><rect x="${x(a).toFixed(1)}" y="${y}"
+          width="${(x(b)-x(a)).toFixed(1)}" height="${ALTO}" rx="10"/></clipPath>
+        <rect x="${X0}" y="${y}" width="${ANCHO}" height="${ALTO}"
+          fill="url(#dia)" clip-path="url(#c${i})"/>`;
+    const des = descansoDe(p.id, fecha, t);
+    if(des){
+      const d0 = Math.max(a, des.ini), d1 = Math.min(b, des.ini + des.min);
+      if(d1 > d0) svg += `<rect x="${x(d0).toFixed(1)}" y="${y}"
+        width="${(x(d1)-x(d0)).toFixed(1)}" height="${ALTO}"
+        fill="url(#des)" clip-path="url(#c${i})"/>`;
+    }
+    svg += `</g>
+      <text x="${(x(a)+10).toFixed(1)}" y="${y+ALTO/2+5}" font-family="Helvetica,Arial,sans-serif"
+        font-size="14" font-weight="700" fill="#3A3526">${esc2(fmtCorto(a))}</text>
+      <text x="${(x(b)-10).toFixed(1)}" y="${y+ALTO/2+5}" text-anchor="end"
+        font-family="Helvetica,Arial,sans-serif" font-size="14" font-weight="700"
+        fill="#3A3526">${esc2(fmtCorto(b))}</text>
+      <text x="${X1+14}" y="${y+ALTO/2+5}" font-family="Helvetica,Arial,sans-serif"
+        font-size="14" fill="#6E6B63">${esc2(horas(horasTurno(t)))}</text>`;
+  });
+
+  const ley = [['mañana',FRANJA.manana],['tarde',FRANJA.tarde],['noche',FRANJA.noche]];
+  ley.forEach(([n,c], i) => {
+    const lx = MI + i*130;
+    svg += `<rect x="${lx}" y="${H-42}" width="13" height="13" rx="3" fill="${c}"/>
+      <text x="${lx+20}" y="${H-31}" font-family="Helvetica,Arial,sans-serif"
+        font-size="13" fill="#6E6B63">${n}</text>`;
+  });
+  svg += `<text x="${W-MI}" y="${H-31}" text-anchor="end"
+    font-family="Georgia,serif" font-size="12" letter-spacing="2"
+    fill="#9C988E">LIBROS DEL FUEGO</text></svg>`;
+
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = W*2; c.height = H*2;
+    const ctx = c.getContext('2d');
+    ctx.scale(2,2); ctx.drawImage(img, 0, 0);
+    c.toBlob(b => {
+      if(!b) return brindis('No se pudo generar la imagen');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b);
+      a.download = 'turnos-' + fecha + '.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      brindis('Imagen descargada');
+    }, 'image/png');
+  };
+  img.onerror = () => brindis('No se pudo generar la imagen');
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
 /* =====================================================================
@@ -1143,6 +1287,194 @@ function enlazarDeslizador(cont, id, descanso, alSoltar){
 }
 
 
+
+
+/* Repite el turno de una persona en los días que se elijan. Sirve para
+   quien hace siempre el mismo horario. */
+function formRepetir(persona, fecha, turno, alTerminar){
+  const l = libDe(persona.libreria_id);
+  const [r0, r1] = (l?.modo_fiesta && l.evento_inicio && l.evento_fin)
+    ? [l.evento_inicio, l.evento_fin] : S.rango;
+  const dow = ['D','L','M','X','J','V','S'];
+  const nombres = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+
+  const v = modal(`<h3>Repetir este turno</h3>
+    <p class="nota" style="margin-top:6px">${esc(persona.nombre)} ·
+      ${fmt(min(turno.inicio))} a ${fmt(min(turno.fin))}
+      ${turno.descanso_min ? '· descanso de ' + turno.descanso_min + ' min' : '· sin descanso'}.
+      Se copiará a los días que marques, sobrescribiendo lo que hubiera.</p>
+
+    <label class="campo">Días de la semana</label>
+    <div style="display:flex;gap:5px;flex-wrap:wrap">${dow.map((d,i) => `
+      <label style="display:flex;align-items:center;gap:5px;font-size:.8rem;
+        border:1px solid var(--linea-fuerte);border-radius:8px;padding:8px 11px">
+        <input type="checkbox" class="rDia" value="${i}"
+          ${(persona.dias_trabajo||[0,1,2,3,4,5,6]).includes(i)?' checked':''}> ${d}</label>`).join('')}
+    </div>
+    <div class="btn-fila" style="margin-top:10px">
+      <button class="btn sec mini" id="rTodos">Todos los días</button>
+      <button class="btn sec mini" id="rLaboral">Lunes a viernes</button>
+      <button class="btn sec mini" id="rFinde">Fines de semana</button>
+    </div>
+
+    <div class="rango-fechas">
+      <div><label for="rD">Desde</label><input type="date" id="rD" value="${fecha}"></div>
+      <div><label for="rH">Hasta</label><input type="date" id="rH" value="${r1 > fecha ? r1 : fecha}"></div>
+    </div>
+    <p class="nota" id="rCuenta" style="margin-top:10px"></p>
+    <div class="err" id="rErr"></div>
+    <div class="btn-fila">
+      <button class="btn" style="flex:1" id="rOk">Repetir</button>
+      <button class="btn sec" id="rNo">Cancelar</button></div>`);
+
+  const marcados = () => [...v.querySelectorAll('.rDia:checked')].map(x => +x.value);
+  const dias = () => {
+    const a = v.querySelector('#rD').value, b = v.querySelector('#rH').value;
+    if(!a || !b || b < a) return [];
+    return diasDe(a,b).filter(d => marcados().includes(dowDe(d)));
+  };
+  const contar = () => {
+    const n = dias().length;
+    v.querySelector('#rCuenta').textContent = n
+      ? `Se asignará en ${n} ${n===1?'día':'días'}: ${
+          [...new Set(dias().map(d => nombres[dowDe(d)]))].join(', ')}.`
+      : 'Ningún día coincide con lo elegido.';
+    v.querySelector('#rOk').disabled = n === 0;
+  };
+  v.querySelectorAll('.rDia, #rD, #rH').forEach(x => x.onchange = contar);
+  v.querySelector('#rTodos').onclick = () => {
+    v.querySelectorAll('.rDia').forEach(x => x.checked = true); contar(); };
+  v.querySelector('#rLaboral').onclick = () => {
+    v.querySelectorAll('.rDia').forEach(x => x.checked = +x.value >= 1 && +x.value <= 5); contar(); };
+  v.querySelector('#rFinde').onclick = () => {
+    v.querySelectorAll('.rDia').forEach(x => x.checked = +x.value === 0 || +x.value === 6); contar(); };
+  v.querySelector('#rNo').onclick = () => v.remove();
+  contar();
+
+  v.querySelector('#rOk').onclick = async () => {
+    const ds = dias();
+    if(!ds.length) return;
+    const filas = ds.map(d => ({
+      persona_id: persona.id, fecha: d, tipo: turno.tipo || 'personalizado',
+      inicio: turno.inicio, fin: turno.fin,
+      descanso_inicio: turno.descanso_inicio, descanso_min: turno.descanso_min || 0,
+      fijo: true, aprobado: true, actualizado_por: S.yo.id
+    }));
+    const r = await sb.from('turnos').upsert(filas, { onConflict:'persona_id,fecha' });
+    if(r.error) return v.querySelector('#rErr').textContent = traducirBase(r.error.message);
+    v.remove(); brindis('Turno repetido en ' + ds.length + ' días');
+    alTerminar();
+  };
+}
+
+/* =====================================================================
+   TARIFAS
+   El valor hora vive en su propia tabla, con fecha de vigencia. Cambiar
+   la base de la librería afecta a todos menos a quien tenga valor propio.
+   ===================================================================== */
+async function panelTarifas(){
+  const l = libDe(S.libreriaVista);
+  const r = await sb.rpc('tarifas_vigentes', { p_libreria: S.libreriaVista });
+  if(r.error) return brindis(traducirBase(r.error.message));
+  const filas = r.data || [];
+  const base = await sb.from('tarifas').select('valor_hora,vigente_desde')
+    .eq('libreria_id', S.libreriaVista).is('persona_id', null)
+    .lte('vigente_desde', S.fecha)
+    .order('vigente_desde',{ascending:false}).order('creada_en',{ascending:false}).limit(1);
+  const valorBase = base.data?.[0]?.valor_hora ?? 0;
+
+  const v = modal(`<h3>Valor hora · ${esc(l?.nombre || '')}</h3>
+    <p class="nota" style="margin-top:6px">La base rige para quien no tenga
+    un valor propio. Los cambios no retroactivos respetan lo ya trabajado:
+    los días anteriores se liquidan al valor que regía entonces.</p>
+
+    <label class="campo" for="tbVal">Valor hora base de la librería</label>
+    <input type="number" id="tbVal" step="500" value="${valorBase || ''}" placeholder="15000">
+    <label class="campo" for="tbDesde">Rige desde</label>
+    <input type="date" id="tbDesde" value="${S.fecha}">
+    <label class="campo" style="display:flex;align-items:center;gap:8px;text-transform:none;
+      letter-spacing:0;font-size:.84rem;font-family:'Archivo'">
+      <input type="checkbox" id="tbRetro"> Aplicar también a los días ya trabajados</label>
+    <p class="nota" id="tbNota" style="margin-top:6px">Sin marcar, lo anterior queda
+      como está. Las liquidaciones ya congeladas no se tocan nunca.</p>
+    <div class="btn-fila"><button class="btn" id="tbGuardar">Guardar base</button></div>
+
+    <div style="margin-top:22px"><span class="lbl">valores individuales</span></div>
+    <ul class="lista">` + filas.map(f => `<li>
+        <div class="info"><b>${esc(f.nombre)}</b>
+          <span>${f.propia ? 'valor propio' : 'usa la base de la librería'}</span></div>
+        <div class="dato">${pesos(f.valor)}</div>
+        <button class="btn sec mini" data-tarifa="${f.persona_id}"
+          data-nombre="${esc(f.nombre)}" data-valor="${f.valor}"
+          data-propia="${f.propia ? 1 : 0}">Cambiar</button></li>`).join('')
+    + `</ul>
+    <div class="err" id="tbErr"></div>
+    <div class="btn-fila"><button class="btn sec" style="flex:1" id="tbCerrar">Cerrar</button></div>`);
+
+  v.querySelector('#tbCerrar').onclick = () => v.remove();
+  v.querySelector('#tbRetro').onchange = e => {
+    v.querySelector('#tbDesde').disabled = e.target.checked;
+    v.querySelector('#tbNota').textContent = e.target.checked
+      ? 'Se recalculan todas las jornadas pendientes de liquidar, desde el primer día.'
+      : 'Sin marcar, lo anterior queda como está. Las liquidaciones ya congeladas no se tocan nunca.';
+  };
+  v.querySelector('#tbGuardar').onclick = async () => {
+    const val = +v.querySelector('#tbVal').value;
+    if(!val || val < 0) return v.querySelector('#tbErr').textContent = 'Pon un valor válido.';
+    const retro = v.querySelector('#tbRetro').checked;
+    const q = await sb.rpc('fijar_tarifa', { p_libreria:S.libreriaVista, p_persona:null,
+      p_valor:val, p_desde: retro ? null : v.querySelector('#tbDesde').value,
+      p_retroactivo: retro });
+    if(q.error) return v.querySelector('#tbErr').textContent = traducirBase(q.error.message);
+    v.remove(); brindis('Valor base: ' + pesos(val)); panelTarifas();
+  };
+  v.querySelectorAll('[data-tarifa]').forEach(b => b.onclick = () =>
+    formTarifaPersona(b.dataset.tarifa, b.dataset.nombre, +b.dataset.valor,
+      b.dataset.propia === '1', () => { v.remove(); panelTarifas(); }));
+}
+
+function formTarifaPersona(id, nombre, actual, propia, alCerrar){
+  const v = modal(`<h3>${esc(nombre)}</h3>
+    <p class="nota" style="margin-top:6px">Hoy se le paga ${pesos(actual)} la hora,
+      ${propia ? 'con valor propio' : 'tomado de la base de la librería'}.</p>
+    <label class="campo" for="tpVal">Nuevo valor hora</label>
+    <input type="number" id="tpVal" step="500" value="${actual || ''}">
+    <label class="campo" for="tpDesde">Rige desde</label>
+    <input type="date" id="tpDesde" value="${S.fecha}">
+    <label class="campo" style="display:flex;align-items:center;gap:8px;text-transform:none;
+      letter-spacing:0;font-size:.84rem;font-family:'Archivo'">
+      <input type="checkbox" id="tpRetro"> Aplicar también a los días ya trabajados</label>
+    <div class="err" id="tpErr2"></div>
+    <div class="btn-fila">
+      <button class="btn" style="flex:1" id="tpOk">Guardar</button>
+      <button class="btn sec" id="tpNo">Cancelar</button></div>
+    ${propia ? `<div class="btn-fila">
+      <button class="btn peligro mini" id="tpQuitar">Quitar valor propio</button></div>
+      <p class="nota" style="margin-top:8px">Volvería a la base de la librería,
+      también para los días pasados que no estén liquidados.</p>` : ''}`);
+
+  v.querySelector('#tpNo').onclick = () => v.remove();
+  v.querySelector('#tpRetro').onchange = e =>
+    v.querySelector('#tpDesde').disabled = e.target.checked;
+  v.querySelector('#tpOk').onclick = async () => {
+    const val = +v.querySelector('#tpVal').value;
+    if(!val || val < 0) return v.querySelector('#tpErr2').textContent = 'Pon un valor válido.';
+    const retro = v.querySelector('#tpRetro').checked;
+    const q = await sb.rpc('fijar_tarifa', { p_libreria:S.libreriaVista, p_persona:id,
+      p_valor:val, p_desde: retro ? null : v.querySelector('#tpDesde').value,
+      p_retroactivo: retro });
+    if(q.error) return v.querySelector('#tpErr2').textContent = traducirBase(q.error.message);
+    v.remove(); brindis(nombre.split(' ')[0] + ': ' + pesos(val) + ' la hora'); alCerrar();
+  };
+  const q = v.querySelector('#tpQuitar');
+  if(q) q.onclick = async () => {
+    if(!confirm('¿Quitar el valor propio de ' + nombre + '?')) return;
+    const r = await sb.rpc('quitar_tarifa_propia', { p_persona: id });
+    if(r.error) return v.querySelector('#tpErr2').textContent = traducirBase(r.error.message);
+    v.remove(); brindis('Vuelve a la base de la librería'); alCerrar();
+  };
+}
+
 /* =====================================================================
    MÓDULO DE FERIA · por librería
    ===================================================================== */
@@ -1344,7 +1676,7 @@ async function vistaAdmin(){
       ? 'Los botones de marcar están apagados hasta las '
         + (l?.reactivar_a?.slice(0,5) || '08:00') + ' de mañana.'
       : 'Al cerrar se apagan los botones de marcar de todo el equipo.'}</p>`;
-  const abiertas = gente.filter(p => { const j = jornadaDe(p.id); return j?.saludo_en && !j.cierre_en; });
+  const abiertas = gente.filter(p => { const j = marcaDe(p.id); return j?.saludo_en && !j.cierre_en; });
   if(!cerrado && abiertas.length)
     h += `<div class="alerta" style="margin-top:10px"><b>${abiertas.length}
       ${abiertas.length===1?'jornada abierta':'jornadas abiertas'}</b>
@@ -1382,9 +1714,21 @@ async function vistaAdmin(){
   }).join('');
   h += `</div>`;
 
-  h += `<div class="bloque"><span class="lbl">personal de ${esc(l?.nombre)}</span><ul class="lista">` +
-    gente.map(p => {
-      const e = estadoDe(p.id), j = jornadaDe(p.id);
+  const retirados = S.personas.filter(p => p.libreria_id === S.libreriaVista && !p.activa);
+  const lista = S.verRetirados ? [...gente, ...retirados] : gente;
+  h += `<div class="bloque">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px">
+      <span class="lbl">personal de ${esc(l?.nombre)}</span>
+      ${retirados.length ? `<button class="btn sec mini" id="togRetirados">
+        ${S.verRetirados ? 'Ocultar' : 'Ver'} retirados (${retirados.length})</button>` : ''}
+    </div><ul class="lista">` +
+    lista.map(p => {
+      const e = estadoDe(p.id), j = marcaDe(p.id);
+      if(!p.activa) return `<li style="opacity:.62">${avatar(p,44)}
+        <div class="info"><b>${esc(p.nombre)}</b>
+        <span>Retirado${p.fecha_salida ? ' el ' + esc(fechaCorta(p.fecha_salida)) : ''}
+        · sin acceso</span></div>
+        <button class="btn sec mini" data-editar-persona="${p.id}">Editar</button></li>`;
       return `<li>${avatar(p,44,e.clave)}
         <div class="info"><b>${esc(p.nombre)}${p.es_admin?' · coordinación':''}</b>
         <span>${esc(e.txt)}${p.correo?'':' · sin correo, no puede entrar'}</span>
@@ -1396,6 +1740,7 @@ async function vistaAdmin(){
     }).join('') + `</ul>
     <div class="btn-fila"><button class="btn" id="nuevaPersona">Agregar persona</button>
       <button class="btn sec" id="verHorarios">Administrar horarios</button>
+      <button class="btn sec" id="verTarifas">Valor hora</button>
       <button class="btn sec" id="verLiquidacion">Liquidar honorarios</button></div></div>`;
 
   h += `<div class="bloque"><span class="lbl">publicar en el tablero</span>
@@ -1493,6 +1838,7 @@ async function panelHorarios(){
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
           ${avatar(p,32)}<b style="font-size:.84rem;flex:1">${esc(p.nombre_corto)}
           ${tocado?'<span class="pendiente"> ·  sin guardar</span>':''}</b>
+          <button class="btn sec mini" data-repetir="${p.id}">Repetir</button>
           <button class="btn sec mini" data-librar="${p.id}">Dejar libre</button></div>
         ${deslizador(p.id, a.ini, a.fin, a.desc)}</div>`;
     }).join('');
@@ -1516,6 +1862,14 @@ async function panelHorarios(){
     v.querySelectorAll('[data-librar]').forEach(btn => btn.onclick = () => {
       borrador[btn.dataset.librar] = { libre:true };
       dibujar(); refrescarBotones();
+    });
+    v.querySelectorAll('[data-repetir]').forEach(btn => btn.onclick = () => {
+      if(contar()) return brindis('Guarda primero los cambios de este día');
+      const p = gente.find(x => x.id === btn.dataset.repetir);
+      const t = turnosDia.find(x => x.persona_id === p.id);
+      if(!t || !t.inicio) return brindis('Esa persona no tiene turno este día');
+      formRepetir(p, v.querySelector('#hDia').value, t,
+        async () => { await traer(); dibujar(); });
     });
     refrescarBotones(); avisar();
   };
@@ -1617,16 +1971,23 @@ function formPersona(p){
     <label class="campo" style="display:flex;align-items:center;gap:7px;text-transform:none;
       letter-spacing:0;font-size:.82rem;font-family:'Archivo'">
       <input type="checkbox" id="fAdmin"${p?.es_admin?' checked':''}> Es coordinación</label>
-    <label class="campo" for="fTarifa">Valor hora (vacío = el de la librería)</label>
-    <input type="number" id="fTarifa" step="500" placeholder="15000">
+    <p class="nota" style="margin-top:14px">El valor hora se maneja aparte,
+      en «Valor hora» del panel.</p>
     <div class="err" id="fErr"></div>
     <div class="btn-fila">
       <button class="btn" style="flex:1" id="fGuardar">${nuevo?'Agregar y sugerir turnos':'Guardar'}</button>
       <button class="btn sec" id="fCancelar">Cancelar</button></div>
-    ${!nuevo ? `<div class="btn-fila">
-      <button class="btn peligro mini" id="fDesactivar">Retirar del equipo</button></div>
-      <p class="nota" style="margin-top:8px">Retirar no borra: conserva sus horas,
-      publicaciones y liquidaciones.</p>` : ''}`);
+    ${!nuevo ? (p.activa ? `<div class="btn-fila">
+      <button class="btn peligro mini" id="fDesactivar">Retirar del equipo</button>
+      <button class="btn peligro mini" id="fEliminar">Eliminar registro</button></div>
+      <p class="nota" style="margin-top:8px">Retirar conserva sus horas, publicaciones y
+      liquidaciones, y libera su correo para otra persona.
+      Eliminar solo funciona si el registro no tiene historia: es para duplicados.</p>`
+      : `<div class="btn-fila">
+      <button class="btn mini" id="fReincorporar">Reincorporar al equipo</button>
+      <button class="btn peligro mini" id="fEliminar">Eliminar registro</button></div>
+      <p class="nota" style="margin-top:8px">Está retirado desde
+      ${esc(p.fecha_salida || '—')}. Al reincorporarlo hay que volver a ponerle el correo.</p>`) : ''}`);
 
   v.querySelector('#fCancelar').onclick = () => v.remove();
   v.querySelector('#fGuardar').onclick = async () => {
@@ -1646,20 +2007,37 @@ function formPersona(p){
     if(!datos.nombre) return v.querySelector('#fErr').textContent = 'Falta el nombre.';
     const r = p ? await sb.from('personas').update(datos).eq('id', p.id).select().single()
                 : await sb.from('personas').insert(datos).select().single();
-    if(r.error) return v.querySelector('#fErr').textContent = r.error.message;
+    if(r.error) return v.querySelector('#fErr').textContent = traducirBase(r.error.message);
 
-    const tar = v.querySelector('#fTarifa').value;
-    if(tar) await sb.from('tarifas').insert({ persona_id:r.data.id, valor_hora:+tar,
-      vigente_desde: datos.fecha_ingreso, creada_por: S.yo.id });
 
     v.remove(); await cargarBase();
     if(!p) sugerirTurnos(r.data); else render();
   };
   const des = v.querySelector('#fDesactivar');
   if(des) des.onclick = async () => {
-    if(!confirm('¿Retirar a ' + p.nombre + ' del equipo activo?')) return;
-    await sb.from('personas').update({ activa:false, fecha_salida:S.fecha }).eq('id', p.id);
-    v.remove(); await cargarBase(); render();
+    if(!confirm('¿Retirar a ' + p.nombre + '?\n\nConserva sus horas y sus publicaciones, '
+      + 'pero pierde el acceso y su correo queda libre para otra persona.')) return;
+    const r = await sb.rpc('retirar_persona', { p_persona: p.id, p_fecha: S.fecha });
+    if(r.error) return v.querySelector('#fErr').textContent = traducirBase(r.error.message);
+    v.remove(); brindis(p.nombre_corto + ' quedó retirado');
+    await cargarBase(); render();
+  };
+  const eli = v.querySelector('#fEliminar');
+  if(eli) eli.onclick = async () => {
+    if(!confirm('¿Eliminar el registro de ' + p.nombre + '?\n\nSolo funciona si no tiene '
+      + 'jornadas, publicaciones ni liquidaciones. No se puede deshacer.')) return;
+    const r = await sb.rpc('eliminar_persona', { p_persona: p.id });
+    if(r.error) return v.querySelector('#fErr').textContent = traducirBase(r.error.message);
+    v.remove(); brindis('Registro eliminado');
+    await cargarBase(); render();
+  };
+  const rei = v.querySelector('#fReincorporar');
+  if(rei) rei.onclick = async () => {
+    const correo = v.querySelector('#fCorreo').value.trim() || null;
+    const r = await sb.rpc('reincorporar_persona', { p_persona: p.id, p_correo: correo });
+    if(r.error) return v.querySelector('#fErr').textContent = traducirBase(r.error.message);
+    v.remove(); brindis(p.nombre_corto + ' vuelve al equipo');
+    await cargarBase(); render();
   };
 }
 
@@ -1782,8 +2160,6 @@ function formLibreria(l){
     de esta librería. Cada una tiene el suyo.</p>
     <label class="campo" for="cMeta">Meta diaria de ejemplares (opcional)</label>
     <input type="number" id="cMeta" value="${l?.meta_ejemplares ?? ''}">
-    <label class="campo" for="cTar">Valor hora base</label>
-    <input type="number" id="cTar" step="500" placeholder="15000">
     <label class="campo" style="display:flex;align-items:center;gap:7px;text-transform:none;
       letter-spacing:0;font-size:.86rem;font-family:'Archivo'">
       <input type="checkbox" id="cFiesta"${l?.modo_fiesta?' checked':''}> Modo fiesta encendido</label>
@@ -1822,9 +2198,6 @@ function formLibreria(l){
     const r = l ? await sb.from('librerias').update(d).eq('id', l.id).select().single()
                 : await sb.from('librerias').insert(d).select().single();
     if(r.error) return v.querySelector('#cErr').textContent = r.error.message;
-    const tar = v.querySelector('#cTar').value;
-    if(tar) await sb.from('tarifas').insert({ libreria_id:r.data.id, valor_hora:+tar,
-      vigente_desde: S.fecha, creada_por: S.yo.id });
     v.remove(); S.libreriaVista = r.data.id; await cargarBase(); render();
   };
 }
@@ -1983,8 +2356,11 @@ function enlazar(){
   on('nuevaLib', () => formLibreria(null));
   on('editarLib', () => formLibreria(libDe(S.libreriaVista)));
   on('nuevaPersona', () => formPersona(null));
+  on('togRetirados', () => { S.scrollFijo = window.scrollY;
+    S.verRetirados = !S.verRetirados; render(); });
   on('verHorarios', panelHorarios);
   on('verLiquidacion', panelLiquidacion);
+  on('verTarifas', panelTarifas);
   document.querySelectorAll('[data-editar-persona]').forEach(b => b.onclick = () =>
     formPersona(perDe(b.dataset.editarPersona)));
 

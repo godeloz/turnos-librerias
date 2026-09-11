@@ -166,6 +166,9 @@ main.wrap{padding-top:34px}
   font-weight:700;white-space:nowrap;color:#3A3526;letter-spacing:-.01em}
 .descanso{position:absolute;top:0;bottom:0;z-index:1;
   background:repeating-linear-gradient(45deg,rgba(27,26,22,.17) 0 4px,transparent 4px 8px)}
+/* descanso ya marcado: se dibuja donde de verdad ocurrió */
+.descanso.real{background:repeating-linear-gradient(45deg,rgba(27,26,22,.30) 0 4px,transparent 4px 8px);
+  box-shadow:inset 0 0 0 1px rgba(27,26,22,.18)}
 .libre-txt{position:absolute;inset:0;display:flex;align-items:center;padding-left:11px;
   font-size:.7rem;color:var(--tenue)}
 .ahora-linea{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--tinta);z-index:5}
