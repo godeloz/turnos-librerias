@@ -310,6 +310,13 @@ nav.tabs button.act svg{stroke-width:2.2}
   text-transform:uppercase;color:var(--tenue)}
 .pie .marca{font-family:Georgia,'Times New Roman',serif;font-size:.86rem;
   letter-spacing:.18em;color:var(--suave);margin-top:4px}
+.pie .ver{font-family:var(--mono);font-size:.55rem;color:var(--linea-fuerte);margin-top:8px}
+
+/* aviso de día cerrado */
+.cerrado-aviso{background:var(--tinta);color:var(--papel,#FBFBF9);border-radius:var(--r);
+  padding:15px 16px;margin-bottom:16px}
+.cerrado-aviso b{display:block;font-size:.9rem;font-weight:700;margin-bottom:3px}
+.cerrado-aviso p{font-size:.78rem;color:rgba(255,255,255,.78);line-height:1.5}
 
 
 /* ---------- navegador de días ---------- */
@@ -503,8 +510,12 @@ nav.tabs button.act svg{stroke-width:2.2}
 <footer class="pie">
   <div class="op">Operado por</div>
   <div class="marca">LIBROS DEL FUEGO</div>
+  <div class="ver" id="verApp"></div>
 </footer>
 
-<script type="module" src="app.js"></script>
+<script type="module">
+  // la versión viaja en la ruta para que nadie se quede con una copia vieja
+  import("./config.js").then(m => import("./app.js?v=" + m.CONFIG.VERSION));
+</script>
 </body>
 </html>

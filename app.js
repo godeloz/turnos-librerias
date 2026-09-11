@@ -7,6 +7,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { CONFIG } from './config.js';
 import { mensajes } from './mensajes.js';
 
+/* Se muestra en el pie: sirve para saber si alguien arrastra una copia vieja. */
+const VERSION = CONFIG.VERSION || '0';
+
 const sb = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
 const EMOJIS = ['👏','🔥','❤️','😂','📚','💪','🙌','😮'];
@@ -490,6 +493,16 @@ function vistaInicio(){
 
   /* Las acciones se ven siempre. Cuando el día visto no es hoy quedan
      apagadas y dicen por qué, en vez de desaparecer. */
+  /* Si el día está cerrado, que se vea antes que nada: es la causa
+     más común de «no me deja saludar». */
+  if(propia && esHoy && cerrado){
+    h += `<div class="cerrado-aviso">
+      <b>El día está cerrado</b>
+      <p>La coordinación cerró la jornada${S.dia?.cerrado_en ? ' a las ' + horaDe(S.dia.cerrado_en) : ''},
+      así que nadie puede marcar saludo, descanso ni salida.
+      Si es un error, pídeles que lo reabran desde Gestión.</p></div>`;
+  }
+
   if(propia){
     const j = esHoy ? S.miJornada : null;
     const saludado = !!j?.saludo_en, descansado = !!j?.descanso_en, cerrada = !!j?.cierre_en;
@@ -1703,6 +1716,11 @@ async function vistaAdmin(){
       <button class="btn sec mini" id="editarLib">Configurar esta librería</button>
       <button class="btn sec mini" id="nuevaLib">Crear librería</button></div></div>`;
 
+  if(cerrado) h += `<div class="alerta"><b>Ojo: ${esc(fechaLarga(S.fechaVista))} está cerrado</b>
+    <p>Nadie de ${esc(l?.nombre || '')} puede marcar saludo, descanso ni salida ese día.
+    Si no era la intención, reábrelo abajo. Recuerda que el botón cierra
+    <strong>el día que estás viendo</strong>, no necesariamente hoy.</p></div>`;
+
   h += tarjetaFeria(l, resumen);
   h += `<div class="bloque"><span class="lbl">modo feria</span>
     <h3>${l?.modo_fiesta ? 'Encendido' : 'Apagado'}</h3>
@@ -2286,6 +2304,8 @@ async function render(){
     b.classList.toggle('act', b.dataset.v === S.vista));
   pintarCabecera();
   medirBarra();
+  const vv = document.getElementById('verApp');
+  if(vv) vv.textContent = 'v' + VERSION;
 
   const app = document.getElementById('app');
   app.innerHTML = S.vista === 'inicio'   ? vistaInicio()
@@ -2451,7 +2471,10 @@ function enlazar(){
     brindis('Cifras guardadas'); await cargarBase(); render();
   });
   on('cerrarDia', async () => {
-    if(!confirm('Al cerrar, los botones de marcar quedan apagados para todo el equipo. ¿Cerramos?')) return;
+    const cual = S.fechaVista === S.fecha ? 'hoy, ' + fechaLarga(S.fecha)
+               : fechaLarga(S.fechaVista) + ' (que NO es hoy)';
+    if(!confirm('Vas a cerrar ' + cual + '.\n\nLos botones de marcar quedan apagados '
+      + 'para todo el equipo ese día. ¿Cerramos?')) return;
     const r = await sb.rpc('cerrar_dia', { p_libreria:S.libreriaVista, p_fecha:S.fechaVista });
     if(r.error) return brindis(r.error.message);
     brindis('Día cerrado'); await cargarLibreria(); render();

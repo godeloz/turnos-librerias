@@ -14,5 +14,9 @@ export const CONFIG = {
   IMG_EXT:  '.png',
 
   // Zona horaria de toda la operación
-  TZ: 'America/Bogota'
+  TZ: 'America/Bogota',
+
+  // Sube este número en cada publicación. Cambia la ruta de los archivos y
+  // obliga a los navegadores a descargar la versión nueva en vez de la suya.
+  VERSION: '7'
 };
