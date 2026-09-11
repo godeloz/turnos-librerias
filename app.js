@@ -1139,7 +1139,7 @@ async function vistaPerfil(){
   const equipo = equipoDe(p.libreria_id);
   h += `<div class="bloque"><span class="lbl">equipo de trabajo</span>
     <div class="equipo">` + equipo.map(x => `<div class="uno">
-      ${avatar(x, 72, S.fechaVista === S.fecha ? estadoDe(x.id).clave : null)}
+      ${avatar(x, 72)}
       <b>${esc(x.nombre_corto)}</b>
       <span>${x.es_admin ? 'coordinación' : 'librería'}</span></div>`).join('')
     + `</div></div>`;

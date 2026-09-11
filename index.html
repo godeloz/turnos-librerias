@@ -89,7 +89,8 @@ header.top{position:sticky;top:var(--alto-tabs,0px);z-index:40;background:var(--
 .av img{width:100%;height:100%;object-fit:cover;display:block}
 .av .ini{font-family:var(--mono);font-weight:700;color:var(--cobalto)}
 .av-ring{display:inline-grid;place-items:center;padding:3px;border-radius:50%;
-  background:var(--linea);flex:0 0 auto;line-height:0;font-size:0;aspect-ratio:1}
+  background:var(--linea);flex:0 0 auto;line-height:0;font-size:0;
+  width:max-content;height:max-content;justify-self:center}
 .av-ring.sala{background:var(--lima)}
 .av-ring.descanso{background:var(--amarillo)}
 .av-ring.tarde{background:var(--coral)}
@@ -433,6 +434,7 @@ nav.tabs button.act svg{stroke-width:2.2}
 /* ---------- equipo de trabajo ---------- */
 .equipo{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:14px}
 .equipo .uno{text-align:center}
+.equipo .uno .av,.equipo .uno .av-ring{margin:0 auto}
 .equipo .uno b{display:block;font-size:.74rem;font-weight:600;margin-top:7px;line-height:1.25}
 .equipo .uno span{display:block;font-size:.64rem;color:var(--tenue);margin-top:1px}
 
