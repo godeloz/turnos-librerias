@@ -1374,60 +1374,114 @@ function formRepetir(persona, fecha, turno, alTerminar){
    ===================================================================== */
 async function panelTarifas(){
   const l = libDe(S.libreriaVista);
-  const r = await sb.rpc('tarifas_vigentes', { p_libreria: S.libreriaVista });
-  if(r.error) return brindis(traducirBase(r.error.message));
-  const filas = r.data || [];
-  const base = await sb.from('tarifas').select('valor_hora,vigente_desde')
-    .eq('libreria_id', S.libreriaVista).is('persona_id', null)
-    .lte('vigente_desde', S.fecha)
-    .order('vigente_desde',{ascending:false}).order('creada_en',{ascending:false}).limit(1);
-  const valorBase = base.data?.[0]?.valor_hora ?? 0;
+  const ids = S.personas.filter(p => p.libreria_id === S.libreriaVista).map(p => p.id);
+
+  const [vig, hist, propias] = await Promise.all([
+    sb.rpc('tarifas_vigentes', { p_libreria: S.libreriaVista }),
+    sb.from('tarifas').select('*').eq('libreria_id', S.libreriaVista).is('persona_id', null)
+      .order('vigente_desde',{ascending:false}).order('creada_en',{ascending:false}).limit(12),
+    ids.length ? sb.from('tarifas').select('*').in('persona_id', ids)
+      .order('vigente_desde',{ascending:false}).order('creada_en',{ascending:false})
+      : Promise.resolve({data:[]})
+  ]);
+  if(vig.error) return brindis(traducirBase(vig.error.message));
+
+  const H = hist.data || [], P = propias.data || [], filas = vig.data || [];
+  const actual = H.find(t => t.vigente_desde <= S.fecha) || null;
+  const futura = H.filter(t => t.vigente_desde > S.fecha);
+  /* «desde siempre» es la marca de un cambio retroactivo */
+  const desdeTxt = t => t.vigente_desde <= '2000-01-02'
+    ? 'desde el principio' : 'desde el ' + fechaLarga(t.vigente_desde);
 
   const v = modal(`<h3>Valor hora · ${esc(l?.nombre || '')}</h3>
-    <p class="nota" style="margin-top:6px">La base rige para quien no tenga
-    un valor propio. Los cambios no retroactivos respetan lo ya trabajado:
-    los días anteriores se liquidan al valor que regía entonces.</p>
 
-    <label class="campo" for="tbVal">Valor hora base de la librería</label>
-    <input type="number" id="tbVal" step="500" value="${valorBase || ''}" placeholder="15000">
-    <label class="campo" for="tbDesde">Rige desde</label>
+    <div class="bloque" style="background:var(--fondo);margin-top:14px">
+      <span class="lbl">base vigente hoy</span>
+      <div style="font-size:2rem;font-weight:800;letter-spacing:-.04em;line-height:1">
+        ${actual ? pesos(actual.valor_hora) : 'sin definir'}</div>
+      <p class="nota" style="margin-top:6px">${actual
+        ? esc(desdeTxt(actual)) + '.' : 'Esta librería todavía no tiene valor base.'}
+        ${futura.length ? `<br>Programado: ${pesos(futura[0].valor_hora)}
+          ${esc(desdeTxt(futura[0]))}.` : ''}</p>
+    </div>
+
+    <p class="nota">La base rige para quien no tenga un valor propio.
+    Cerrar un día no bloquea nada: solo las liquidaciones ya congeladas quedan fuera.</p>
+
+    <label class="campo" for="tbVal">Nuevo valor base</label>
+    <input type="number" id="tbVal" step="500" value="${actual?.valor_hora ?? ''}" placeholder="15000">
+
+    <label class="campo">Desde cuándo</label>
+    <label style="display:flex;align-items:center;gap:9px;font-size:.84rem;padding:4px 0">
+      <input type="radio" name="tbModo" id="tbFecha" value="fecha" checked style="width:auto">
+      Desde una fecha</label>
     <input type="date" id="tbDesde" value="${S.fecha}">
-    <label class="campo" style="display:flex;align-items:center;gap:8px;text-transform:none;
-      letter-spacing:0;font-size:.84rem;font-family:'Archivo'">
-      <input type="checkbox" id="tbRetro"> Aplicar también a los días ya trabajados</label>
-    <p class="nota" id="tbNota" style="margin-top:6px">Sin marcar, lo anterior queda
-      como está. Las liquidaciones ya congeladas no se tocan nunca.</p>
+    <label style="display:flex;align-items:center;gap:9px;font-size:.84rem;padding:10px 0 2px">
+      <input type="radio" name="tbModo" value="retro" id="tbRetro" style="width:auto">
+      Para todo lo trabajado, incluidos los días pasados</label>
+    <p class="nota" id="tbNota"></p>
+
+    <div class="err" id="tbErr"></div>
+    <div class="ok" id="tbOk2"></div>
     <div class="btn-fila"><button class="btn" id="tbGuardar">Guardar base</button></div>
 
-    <div style="margin-top:22px"><span class="lbl">valores individuales</span></div>
-    <ul class="lista">` + filas.map(f => `<li>
+    ${H.length > 1 ? `<div style="margin-top:22px"><span class="lbl">historial de la base</span></div>
+      <ul class="lista">${H.map(t => `<li>
+        <div class="info"><b>${pesos(t.valor_hora)}</b><span>${esc(desdeTxt(t))}</span></div>
+        ${t.vigente_desde > S.fecha ? `<button class="btn peligro mini"
+          data-quitar-tarifa="${t.id}">Quitar</button>` : ''}</li>`).join('')}</ul>` : ''}
+
+    <div style="margin-top:22px"><span class="lbl">valor de cada persona</span></div>
+    <ul class="lista">` + filas.map(f => {
+      const suya = P.find(t => t.persona_id === f.persona_id && t.vigente_desde <= S.fecha);
+      return `<li>
         <div class="info"><b>${esc(f.nombre)}</b>
-          <span>${f.propia ? 'valor propio' : 'usa la base de la librería'}</span></div>
+          <span>${suya ? 'valor propio ' + esc(desdeTxt(suya)) : 'usa la base de la librería'}</span></div>
         <div class="dato">${pesos(f.valor)}</div>
         <button class="btn sec mini" data-tarifa="${f.persona_id}"
           data-nombre="${esc(f.nombre)}" data-valor="${f.valor}"
-          data-propia="${f.propia ? 1 : 0}">Cambiar</button></li>`).join('')
-    + `</ul>
-    <div class="err" id="tbErr"></div>
+          data-propia="${suya ? 1 : 0}">Cambiar</button></li>`;
+    }).join('') + `</ul>
     <div class="btn-fila"><button class="btn sec" style="flex:1" id="tbCerrar">Cerrar</button></div>`);
 
-  v.querySelector('#tbCerrar').onclick = () => v.remove();
-  v.querySelector('#tbRetro').onchange = e => {
-    v.querySelector('#tbDesde').disabled = e.target.checked;
-    v.querySelector('#tbNota').textContent = e.target.checked
-      ? 'Se recalculan todas las jornadas pendientes de liquidar, desde el primer día.'
-      : 'Sin marcar, lo anterior queda como está. Las liquidaciones ya congeladas no se tocan nunca.';
+  const modo = () => v.querySelector('#tbRetro').checked ? 'retro' : 'fecha';
+  const pintarNota = () => {
+    const r = modo() === 'retro';
+    v.querySelector('#tbDesde').disabled = r;
+    v.querySelector('#tbNota').textContent = r
+      ? 'Reemplaza el historial: todas las jornadas pendientes de liquidar pasan a este valor.'
+      : 'Los días anteriores a esa fecha conservan el valor que regía entonces.';
   };
+  v.querySelectorAll('[name=tbModo]').forEach(x => x.onchange = pintarNota);
+  pintarNota();
+  v.querySelector('#tbCerrar').onclick = () => v.remove();
+
   v.querySelector('#tbGuardar').onclick = async () => {
     const val = +v.querySelector('#tbVal').value;
-    if(!val || val < 0) return v.querySelector('#tbErr').textContent = 'Pon un valor válido.';
-    const retro = v.querySelector('#tbRetro').checked;
+    const err = v.querySelector('#tbErr'), ok = v.querySelector('#tbOk2');
+    err.textContent = ''; ok.textContent = '';
+    if(!val || val < 0) return err.textContent = 'Pon un valor válido.';
+    const r = modo() === 'retro';
+    const desde = v.querySelector('#tbDesde').value;
+    if(!r && !desde) return err.textContent = 'Elige desde qué fecha rige.';
+
+    const btn = v.querySelector('#tbGuardar');
+    btn.disabled = true; btn.textContent = 'Guardando…';
     const q = await sb.rpc('fijar_tarifa', { p_libreria:S.libreriaVista, p_persona:null,
-      p_valor:val, p_desde: retro ? null : v.querySelector('#tbDesde').value,
-      p_retroactivo: retro });
-    if(q.error) return v.querySelector('#tbErr').textContent = traducirBase(q.error.message);
-    v.remove(); brindis('Valor base: ' + pesos(val)); panelTarifas();
+      p_valor:val, p_desde: r ? null : desde, p_retroactivo: r });
+    btn.disabled = false; btn.textContent = 'Guardar base';
+    if(q.error) return err.textContent = traducirBase(q.error.message);
+    brindis('Base: ' + pesos(val));
+    v.remove(); panelTarifas();       // se reabre mostrando ya el valor nuevo
   };
+
+  v.querySelectorAll('[data-quitar-tarifa]').forEach(b => b.onclick = async () => {
+    if(!confirm('¿Quitar ese cambio programado?')) return;
+    const q = await sb.from('tarifas').delete().eq('id', b.dataset.quitarTarifa);
+    if(q.error) return v.querySelector('#tbErr').textContent = traducirBase(q.error.message);
+    v.remove(); panelTarifas();
+  });
+
   v.querySelectorAll('[data-tarifa]').forEach(b => b.onclick = () =>
     formTarifaPersona(b.dataset.tarifa, b.dataset.nombre, +b.dataset.valor,
       b.dataset.propia === '1', () => { v.remove(); panelTarifas(); }));
@@ -1437,13 +1491,19 @@ function formTarifaPersona(id, nombre, actual, propia, alCerrar){
   const v = modal(`<h3>${esc(nombre)}</h3>
     <p class="nota" style="margin-top:6px">Hoy se le paga ${pesos(actual)} la hora,
       ${propia ? 'con valor propio' : 'tomado de la base de la librería'}.</p>
+
     <label class="campo" for="tpVal">Nuevo valor hora</label>
     <input type="number" id="tpVal" step="500" value="${actual || ''}">
-    <label class="campo" for="tpDesde">Rige desde</label>
+
+    <label class="campo">Desde cuándo</label>
+    <label style="display:flex;align-items:center;gap:9px;font-size:.84rem;padding:4px 0">
+      <input type="radio" name="tpModo" id="tpFecha" value="fecha" checked style="width:auto">
+      Desde una fecha</label>
     <input type="date" id="tpDesde" value="${S.fecha}">
-    <label class="campo" style="display:flex;align-items:center;gap:8px;text-transform:none;
-      letter-spacing:0;font-size:.84rem;font-family:'Archivo'">
-      <input type="checkbox" id="tpRetro"> Aplicar también a los días ya trabajados</label>
+    <label style="display:flex;align-items:center;gap:9px;font-size:.84rem;padding:10px 0 2px">
+      <input type="radio" name="tpModo" value="retro" id="tpRetro" style="width:auto">
+      Para todo lo trabajado, incluidos los días pasados</label>
+
     <div class="err" id="tpErr2"></div>
     <div class="btn-fila">
       <button class="btn" style="flex:1" id="tpOk">Guardar</button>
@@ -1453,16 +1513,19 @@ function formTarifaPersona(id, nombre, actual, propia, alCerrar){
       <p class="nota" style="margin-top:8px">Volvería a la base de la librería,
       también para los días pasados que no estén liquidados.</p>` : ''}`);
 
+  const modo = () => v.querySelector('#tpRetro').checked ? 'retro' : 'fecha';
+  v.querySelectorAll('[name=tpModo]').forEach(x => x.onchange = () =>
+    v.querySelector('#tpDesde').disabled = modo() === 'retro');
   v.querySelector('#tpNo').onclick = () => v.remove();
-  v.querySelector('#tpRetro').onchange = e =>
-    v.querySelector('#tpDesde').disabled = e.target.checked;
+
   v.querySelector('#tpOk').onclick = async () => {
     const val = +v.querySelector('#tpVal').value;
     if(!val || val < 0) return v.querySelector('#tpErr2').textContent = 'Pon un valor válido.';
-    const retro = v.querySelector('#tpRetro').checked;
+    const r = modo() === 'retro';
+    const desde = v.querySelector('#tpDesde').value;
+    if(!r && !desde) return v.querySelector('#tpErr2').textContent = 'Elige desde qué fecha rige.';
     const q = await sb.rpc('fijar_tarifa', { p_libreria:S.libreriaVista, p_persona:id,
-      p_valor:val, p_desde: retro ? null : v.querySelector('#tpDesde').value,
-      p_retroactivo: retro });
+      p_valor:val, p_desde: r ? null : desde, p_retroactivo: r });
     if(q.error) return v.querySelector('#tpErr2').textContent = traducirBase(q.error.message);
     v.remove(); brindis(nombre.split(' ')[0] + ': ' + pesos(val) + ' la hora'); alCerrar();
   };
